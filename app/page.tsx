@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BarChart3, Bell, BookOpen, CalendarDays, Camera, Check, CheckCircle2,
   ChevronRight, ClipboardPlus, Download, Eye, Factory, FileSpreadsheet, FileText,
-  LayoutDashboard, Mail, Menu, Paperclip, Plus, Printer, Search, ShieldCheck,
-  Video, X,
+  LayoutDashboard, LockKeyhole, LogOut, Mail, Menu, Paperclip, Plus, Printer,
+  Search, ShieldCheck, Video, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { DEFECTS, DEFECT_GROUPS, EQUIPMENT_CODES, EQUIPMENT_CODE_BY_NAME } from "@/lib/inspection-codes";
+import {
+  downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, saveReport,
+  supabase, type Deviation, type StoredReport,
+} from "@/lib/imq-supabase";
 
 const AREAS = [
   { code: "ITIF", name: "Recozimento e Decapagem", equipment: ["RB1", "RB4", "LE1"], color: "#7c3aed" },
@@ -32,19 +36,6 @@ const ALL_EQUIPMENT = AREAS.flatMap((area) => area.equipment.map((equipment) => 
 const DEVIATION_DESTINATIONS = [...EQUIPMENT_CODES, { code: "N/I", equipment: "EB3" }]
   .sort((a, b) => a.equipment.localeCompare(b.equipment));
 
-type AttachmentRef = { id?: string; name: string; type: string; size: number };
-type Deviation = {
-  id: string; area: string; equipment: string; um: string; reason: string;
-  equipmentCode?: string; defectCode?: string; defectName?: string;
-  divertedToEquipment?: string; divertedToEquipmentCode?: string;
-  observation: string; files: File[]; attachments?: AttachmentRef[];
-};
-type ReportPayload = { deviations: Omit<Deviation, "files">[]; reviewed?: string[]; generalObservation?: string };
-type StoredReport = {
-  id: string; reportDate: string; shift: string; reporter: string; status: string;
-  deviationCount: number; createdAt: string; payload: ReportPayload;
-};
-
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(`${value}T12:00:00`));
 const formatDateTime = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
@@ -52,6 +43,8 @@ const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math
 const normalizeSearch = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
 export default function Home() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authUser, setAuthUser] = useState<{ id: string; email?: string } | null>(null);
   const [view, setView] = useState<"dashboard" | "new" | "reports" | "library">("dashboard");
   const [mobileNav, setMobileNav] = useState(false);
   const [reports, setReports] = useState<StoredReport[]>([]);
@@ -70,25 +63,42 @@ export default function Home() {
   const [formFiles, setFormFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const authUserId = authUser?.id;
+
+  useEffect(() => {
+    let mounted = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setAuthUser(data.session?.user ? { id: data.session.user.id, email: data.session.user.email } : null);
+      setAuthReady(true);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+      setAuthReady(true);
+    });
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
 
   async function loadReports() {
     setLoadingReports(true);
     try {
-      const response = await fetch("/api/reports", { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      const data = await response.json() as { reports: StoredReport[] };
-      setReports(data.reports || []);
-    } catch {
+      setReports(await fetchReports());
+    } catch (error) {
       setReports([]);
+      toast.error(error instanceof Error ? error.message : "Não foi possível carregar os relatórios.");
     } finally {
       setLoadingReports(false);
     }
   }
 
   useEffect(() => {
+    if (!authUserId) return;
     const task = window.setTimeout(() => { void loadReports(); }, 0);
     return () => window.clearTimeout(task);
-  }, []);
+  }, [authUserId]);
 
   const reviewedCount = reviewed.length;
   const completion = Math.round((reviewedCount / ALL_EQUIPMENT.length) * 100);
@@ -97,7 +107,11 @@ export default function Home() {
     return (shiftFilter === "todos" || report.shift === shiftFilter) && haystack.includes(search.toLowerCase());
   }), [reports, search, shiftFilter]);
 
-  function beginReport() { setView("new"); setMobileNav(false); }
+  function beginReport() {
+    if (!reporter && authUser?.email) setReporter(authUser.email.split("@")[0].replace(/[._-]+/g, " "));
+    setView("new");
+    setMobileNav(false);
+  }
 
   function openDeviation(area: string, equipment: string) {
     setDialogEquipment({ area, equipment });
@@ -147,27 +161,8 @@ export default function Home() {
     setSaving(true);
     const reportId = crypto.randomUUID();
     try {
-      const normalized = [] as Omit<Deviation, "files">[];
-      for (const deviation of deviations) {
-        const attachments: AttachmentRef[] = [];
-        for (const file of deviation.files) {
-          const data = new FormData(); data.append("file", file); data.append("reportId", reportId);
-          const upload = await fetch("/api/uploads", { method: "POST", body: data });
-          const result = await upload.json() as { attachment?: { id: string }; error?: string };
-          if (!upload.ok || !result.attachment) throw new Error(result.error || `Falha no arquivo ${file.name}`);
-          attachments.push({ id: result.attachment.id, name: file.name, type: file.type, size: file.size });
-        }
-        const { files: _files, ...deviationData } = deviation;
-        void _files;
-        normalized.push({ ...deviationData, attachments });
-      }
-      const response = await fetch("/api/reports", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: reportId, reportDate, shift, reporter, status: "finalizado", deviations: normalized, payload: { reviewed, generalObservation } }),
-      });
-      const result = await response.json() as { report?: StoredReport; error?: string };
-      if (!response.ok || !result.report) throw new Error(result.error || "Falha ao salvar.");
-      setReports((items) => [result.report!, ...items]);
+      await saveReport({ id: reportId, reportDate, shift, reporter: reporter.trim(), reviewed, generalObservation, deviations });
+      setReports(await fetchReports());
       resetDraft(); setView("reports");
       toast.success("Fechamento finalizado e salvo com sucesso.");
     } catch (error) {
@@ -191,12 +186,30 @@ export default function Home() {
     toast.success("Planilha exportada.");
   }
 
-  function printPdf(report: StoredReport) { setSelectedReport(report); setTimeout(() => window.print(), 80); }
+  async function printPdf(report: StoredReport) {
+    try {
+      await downloadReportPdf(report);
+      toast.success("PDF gerado e baixado com sucesso.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível gerar o PDF.");
+    }
+  }
+  async function handleDownloadEvidence(attachment: NonNullable<Deviation["attachments"]>[number]) {
+    try {
+      await downloadEvidence(attachment);
+      toast.success("Evidência baixada.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível baixar a evidência.");
+    }
+  }
   function emailReport(report: StoredReport) {
     const subject = encodeURIComponent(`IMQ | Fechamento ${report.shift} - ${formatDate(report.reportDate)}`);
     const body = encodeURIComponent(`Relatório de turno IMQ\n\nData: ${formatDate(report.reportDate)}\nTurno: ${report.shift}\nResponsável: ${report.reporter}\nDesvios: ${report.deviationCount}\n\nO PDF pode ser gerado no botão Exportar PDF e anexado a esta mensagem.`);
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   }
+
+  if (!authReady) return <AuthLoading />;
+  if (!authUser) return <AuthScreen />;
 
   return (
     <div className="app-shell">
@@ -211,7 +224,7 @@ export default function Home() {
         </nav>
         <div className="sidebar-foot">
           <div className="security-note"><ShieldCheck /><div><strong>Ambiente protegido</strong><span>Dados operacionais seguros</span></div></div>
-          <div className="profile"><div className="avatar">AL</div><div><strong>Abner Lucas</strong><span>Administrador</span></div></div>
+          <div className="profile"><div className="avatar">IMQ</div><div><strong>{authUser.email?.split("@")[0] || "Usuário IMQ"}</strong><span>{authUser.email || "Conta autenticada"}</span></div><Button variant="ghost" size="icon" title="Sair" onClick={() => void supabase.auth.signOut()}><LogOut /></Button></div>
         </div>
       </aside>
 
@@ -268,10 +281,54 @@ export default function Home() {
       </main>
 
       <DeviationDialog key={dialogEquipment ? `${dialogEquipment.area}:${dialogEquipment.equipment}` : "closed"} open={!!dialogEquipment} target={dialogEquipment} form={form} setForm={setForm} files={formFiles} setFiles={setFormFiles} fileInputRef={fileInputRef} onClose={() => setDialogEquipment(null)} onAdd={addDeviation} />
-      <ReportDialog report={selectedReport} onClose={() => setSelectedReport(null)} onPdf={printPdf} onCsv={exportCsv} onEmail={emailReport} />
+      <ReportDialog report={selectedReport} onClose={() => setSelectedReport(null)} onPdf={printPdf} onCsv={exportCsv} onEmail={emailReport} onEvidence={handleDownloadEvidence} />
       {selectedReport && <PrintReport report={selectedReport} />}
     </div>
   );
+}
+
+function AuthLoading() {
+  return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMQ</div><strong>Carregando ambiente seguro...</strong></div></main>;
+}
+
+function AuthScreen() {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!email.trim() || password.length < 8 || (mode === "signup" && name.trim().length < 2)) {
+      setMessage("Preencha os campos corretamente. A senha deve ter pelo menos 8 caracteres.");
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage("");
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { full_name: name.trim() } },
+        });
+        if (error) throw error;
+        if (!data.session) setMessage("Cadastro criado. Confirme o e-mail recebido para entrar no IMQ.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível autenticar.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><div className="brand-mark">IMQ</div><div><strong>IMQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div><div className="auth-heading"><LockKeyhole /><div><h1>{mode === "login" ? "Acessar sistema" : "Criar acesso"}</h1><p>Entre com sua conta segura para acessar relatórios e evidências.</p></div></div><form onSubmit={submit}>{mode === "signup" && <div><Label htmlFor="auth-name">Nome completo</Label><Input id="auth-name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome e sobrenome" /></div>}<div><Label htmlFor="auth-email">E-mail</Label><Input id="auth-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nome@empresa.com" /></div><div><Label htmlFor="auth-password">Senha</Label><Input id="auth-password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo de 8 caracteres" /></div>{message && <p className="auth-message">{message}</p>}<Button type="submit" disabled={submitting}>{submitting ? "Aguarde..." : mode === "login" ? "Entrar no IMQ" : "Criar conta"}</Button></form><button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setMessage(""); }}>{mode === "login" ? "Primeiro acesso? Criar conta" : "Já possui conta? Entrar"}</button><p className="auth-security"><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS.</p></section></main>;
 }
 
 function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
@@ -371,6 +428,22 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
   const normalizedDefectQuery = normalizeSearch(defectQuery);
   const filteredDefects = DEFECTS.filter((item) => normalizeSearch(`${item.code} ${item.name} ${item.group}`).includes(normalizedDefectQuery));
 
+  function addEvidence(selected: FileList | null) {
+    const incoming = Array.from(selected || []);
+    const invalidType = incoming.find((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/"));
+    const oversized = incoming.find((file) => file.size > 50 * 1024 * 1024);
+    if (invalidType) {
+      toast.error(`${invalidType.name} não é uma imagem ou vídeo compatível.`);
+      return;
+    }
+    if (oversized) {
+      toast.error(`${oversized.name} excede o limite de 50 MB.`);
+      return;
+    }
+    setFiles((current) => [...current, ...incoming].slice(0, 6));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   function selectDefect(code: string) {
     const defect = DEFECTS.find((item) => item.code === code);
     if (!defect) return;
@@ -398,19 +471,15 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
   return <Dialog open={open} onOpenChange={(value) => !value && onClose()}><DialogContent className="deviation-dialog"><DialogHeader><div className="dialog-kicker"><AlertTriangle /> REGISTRAR DESVIO</div><DialogTitle>{target?.area} • {target?.equipment}</DialogTitle><DialogDescription>A UM passou pelo equipamento abaixo. Informe o destino do desvio e classifique o defeito.</DialogDescription></DialogHeader>
     <div className="equipment-identification"><span>Equipamento de passagem</span><strong>{target?.equipment || "—"}</strong><span>Código de passagem</span><b>{target ? EQUIPMENT_CODE_BY_NAME[target.equipment] || "N/I" : "—"}</b></div>
     <div className="form-grid"><div className="full-field"><Label htmlFor="um">Unidade Metálica (UM) *</Label><Input id="um" className="mono" placeholder="Ex.: 671606B2000B" maxLength={20} value={form.um} onChange={(e) => setForm((f) => ({ ...f, um: e.target.value.replace(/\s/g, "").toUpperCase() }))} /><small>Use letras e números, sem espaços.</small></div><div className="full-field"><Label>Equipamento de destino do desvio *</Label><Select value={form.divertedToEquipment} onValueChange={(value) => setForm((current) => ({ ...current, divertedToEquipment: value }))}><SelectTrigger className="destination-select"><SelectValue placeholder="Selecione o equipamento de destino" /></SelectTrigger><SelectContent>{DEVIATION_DESTINATIONS.map((item) => <SelectItem value={item.equipment} key={`${item.code}-${item.equipment}`}><span className="destination-option"><b>{item.code}</b><span>{item.equipment}</span></span></SelectItem>)}</SelectContent></Select>{selectedDestination && <div className="selected-destination"><div><span>DESTINO SELECIONADO</span><strong>{selectedDestination.equipment}</strong></div><div><span>CÓDIGO AUTOMÁTICO</span><b>{selectedDestination.code}</b></div></div>}<small>Indique para qual equipamento a UM foi efetivamente desviada.</small></div><div className="full-field"><Label htmlFor="defect-search">Pesquisar código ou descrição do defeito *</Label><div className="defect-search"><Search aria-hidden="true" /><Input id="defect-search" role="combobox" aria-autocomplete="list" aria-expanded={defectSearchOpen} aria-controls="defect-results" autoComplete="off" placeholder="Ex.: 07, arranhão, oxidação..." value={defectQuery} onFocus={() => setDefectSearchOpen(true)} onChange={(event) => { setDefectQuery(event.target.value); setDefectSearchOpen(true); setHighlightedDefect(0); if (form.defectCode) setForm((current) => ({ ...current, defectCode: "" })); }} onKeyDown={handleDefectKeyDown} />{defectQuery && <button type="button" className="defect-search-clear" aria-label="Limpar pesquisa de defeito" onClick={() => { setDefectQuery(""); setDefectSearchOpen(true); setHighlightedDefect(0); setForm((current) => ({ ...current, defectCode: "" })); }}><X /></button>}</div>{defectSearchOpen && <div id="defect-results" className="defect-results" role="listbox" aria-label="Resultados da pesquisa de defeitos">{filteredDefects.length ? filteredDefects.map((item, index) => <button type="button" role="option" aria-selected={form.defectCode === item.code} className={index === highlightedDefect ? "defect-result highlighted" : "defect-result"} key={item.code} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setHighlightedDefect(index)} onClick={() => selectDefect(item.code)}><span className="defect-code">{item.code}</span><span><strong>{item.name}</strong><small>{item.group}</small></span><Check /></button>) : <div className="defect-no-results"><Search /><strong>Nenhum defeito encontrado</strong><span>Tente outro código ou termo.</span></div>}</div>}{selectedDefect && <div className="selected-defect"><span className="defect-code">{selectedDefect.code}</span><div><strong>{selectedDefect.name}</strong><small>{selectedDefect.group}</small></div><CheckCircle2 /></div>}<small>Pesquise pelo código numérico ou por qualquer palavra da descrição.</small></div><div className="full-field"><Label htmlFor="observation">Observação</Label><Textarea id="observation" placeholder="Descreva condição, localização do defeito e ação tomada..." value={form.observation} onChange={(e) => setForm((f) => ({ ...f, observation: e.target.value }))} /></div>
-      <div className="full-field"><Label>Evidências</Label><input ref={fileInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => setFiles((current) => [...current, ...Array.from(e.target.files || [])].slice(0, 6))} /><button className="upload-zone" type="button" onClick={() => fileInputRef.current?.click()}><div><Camera /><Video /></div><strong>Adicionar foto ou vídeo</strong><span>Até 6 arquivos • máximo de 50 MB cada</span></button>{files.length > 0 && <div className="selected-files">{files.map((file, index) => <div key={`${file.name}-${index}`}><Paperclip /><span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span><Button variant="ghost" size="icon" onClick={() => setFiles((items) => items.filter((_, i) => i !== index))}><X /></Button></div>)}</div>}</div></div>
+      <div className="full-field"><Label>Evidências</Label><input ref={fileInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => addEvidence(event.target.files)} /><button className="upload-zone" type="button" onClick={() => fileInputRef.current?.click()}><div><Camera /><Video /></div><strong>Adicionar foto ou vídeo</strong><span>Até 6 arquivos • máximo de 50 MB cada</span></button>{files.length > 0 && <div className="selected-files">{files.map((file, index) => <div key={`${file.name}-${index}`}><Paperclip /><span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span><Button variant="ghost" size="icon" aria-label={`Remover ${file.name}`} onClick={() => setFiles((items) => items.filter((_, i) => i !== index))}><X /></Button></div>)}</div>}</div></div>
     <DialogFooter><Button variant="outline" onClick={onClose}>Cancelar</Button><Button className="deviation-button" onClick={onAdd}><Plus /> Adicionar desvio</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
 
-function ReportDialog({ report, onClose, onPdf, onCsv, onEmail }: { report: StoredReport | null; onClose: () => void; onPdf: (r: StoredReport) => void; onCsv: (r: StoredReport) => void; onEmail: (r: StoredReport) => void }) {
-  return <Dialog open={!!report} onOpenChange={(open) => !open && onClose()}>{report && <DialogContent className="report-dialog"><DialogHeader><div className="dialog-kicker"><FileText /> RELATÓRIO FINALIZADO</div><DialogTitle>{formatDate(report.reportDate)} • Turno {report.shift}</DialogTitle><DialogDescription>Responsável: {report.reporter}</DialogDescription></DialogHeader><div className="report-summary"><div><span>Gerências</span><strong>04</strong></div><div><span>Equipamentos</span><strong>18</strong></div><div><span>Desvios</span><strong>{report.deviationCount}</strong></div></div>{report.payload.deviations.length ? <div className="dialog-deviations">{report.payload.deviations.map((d) => <div key={d.id}><div className="deviation-route"><Badge variant="outline">{d.area}</Badge><span><small>PASSAGEM</small><strong>{d.equipment} • CÓD. {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</strong></span><ChevronRight /><span><small>DESTINO</small><strong>{d.divertedToEquipment || "Não informado"} • CÓD. {d.divertedToEquipmentCode || "—"}</strong></span></div><b className="mono">{d.um}</b><span><span className="defect-code">{d.defectCode || "—"}</span> {d.defectName || d.reason}</span><p>{d.observation || "Sem observação adicional."}</p>{(d.attachments || []).length > 0 && <small><Paperclip /> {d.attachments!.length} evidência(s)</small>}</div>)}</div> : <div className="all-clear"><CheckCircle2 /><div><strong>Turno sem desvios</strong><span>Todos os equipamentos foram revisados.</span></div></div>}{report.payload.generalObservation && <div className="report-note"><strong>Observação geral</strong><p>{report.payload.generalObservation}</p></div>}<DialogFooter className="export-actions"><Button variant="outline" onClick={() => onCsv(report)}><FileSpreadsheet /> Planilha</Button><Button variant="outline" onClick={() => onPdf(report)}><Download /> PDF</Button><Button onClick={() => onEmail(report)}><Mail /> Enviar por e-mail</Button></DialogFooter></DialogContent>}</Dialog>;
+function ReportDialog({ report, onClose, onPdf, onCsv, onEmail, onEvidence }: { report: StoredReport | null; onClose: () => void; onPdf: (r: StoredReport) => void; onCsv: (r: StoredReport) => void; onEmail: (r: StoredReport) => void; onEvidence: (attachment: NonNullable<Deviation["attachments"]>[number]) => void }) {
+  return <Dialog open={!!report} onOpenChange={(open) => !open && onClose()}>{report && <DialogContent className="report-dialog"><DialogHeader><div className="dialog-kicker"><FileText /> RELATÓRIO FINALIZADO</div><DialogTitle>{formatDate(report.reportDate)} • Turno {report.shift}</DialogTitle><DialogDescription>Responsável: {report.reporter}</DialogDescription></DialogHeader><div className="report-summary"><div><span>Gerências</span><strong>04</strong></div><div><span>Equipamentos</span><strong>18</strong></div><div><span>Desvios</span><strong>{report.deviationCount}</strong></div></div>{report.payload.deviations.length ? <div className="dialog-deviations">{report.payload.deviations.map((d) => <div key={d.id}><div className="deviation-route"><Badge variant="outline">{d.area}</Badge><span><small>PASSAGEM</small><strong>{d.equipment} • CÓD. {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</strong></span><ChevronRight /><span><small>DESTINO</small><strong>{d.divertedToEquipment || "Não informado"} • CÓD. {d.divertedToEquipmentCode || "—"}</strong></span></div><b className="mono">{d.um}</b><span><span className="defect-code">{d.defectCode || "—"}</span> {d.defectName || d.reason}</span><p>{d.observation || "Sem observação adicional."}</p>{(d.attachments || []).length > 0 && <div className="evidence-links">{d.attachments!.map((attachment) => <button type="button" key={attachment.id || attachment.name} onClick={() => onEvidence(attachment)}><Download /><span>{attachment.name}</span><small>{formatBytes(attachment.size)}</small></button>)}</div>}</div>)}</div> : <div className="all-clear"><CheckCircle2 /><div><strong>Turno sem desvios</strong><span>Todos os equipamentos foram revisados.</span></div></div>}{report.payload.generalObservation && <div className="report-note"><strong>Observação geral</strong><p>{report.payload.generalObservation}</p></div>}<DialogFooter className="export-actions"><Button variant="outline" onClick={() => onCsv(report)}><FileSpreadsheet /> Planilha</Button><Button variant="outline" onClick={() => onPdf(report)}><Download /> PDF</Button><Button onClick={() => onEmail(report)}><Mail /> Enviar por e-mail</Button></DialogFooter></DialogContent>}</Dialog>;
 }
 
 function PrintReport({ report }: { report: StoredReport }) {
   return <article className="print-report"><header><div className="print-logo">IMQ</div><div><h1>RELATÓRIO DE INSPEÇÃO</h1><p>Laminação a Frio Central • Fechamento de Turno</p></div></header><section className="print-meta"><div><span>Data</span><strong>{formatDate(report.reportDate)}</strong></div><div><span>Turno</span><strong>{report.shift}</strong></div><div><span>Responsável</span><strong>{report.reporter}</strong></div><div><span>Status</span><strong>Finalizado</strong></div></section><h2>Resumo operacional</h2><div className="print-summary"><div><b>04</b><span>Gerências</span></div><div><b>18</b><span>Equipamentos</span></div><div><b>{report.deviationCount}</b><span>Desvios</span></div></div><h2>Ocorrências registradas</h2>{report.payload.deviations.length ? <table><thead><tr><th>Gerência</th><th>Passagem / cód.</th><th>Destino / cód.</th><th>UM</th><th>Cód. defeito</th><th>Defeito</th><th>Observação</th></tr></thead><tbody>{report.payload.deviations.map((d) => <tr key={d.id}><td>{d.area}</td><td>{d.equipment} / {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</td><td>{d.divertedToEquipment || "Não informado"} / {d.divertedToEquipmentCode || "—"}</td><td>{d.um}</td><td>{d.defectCode || "—"}</td><td>{d.defectName || d.reason}</td><td>{d.observation || "—"}</td></tr>)}</tbody></table> : <div className="print-clear">✓ Todos os equipamentos revisados, sem desvios.</div>}{report.payload.generalObservation && <section className="print-observation"><h2>Observação geral</h2><p>{report.payload.generalObservation}</p></section>}<footer><span>IMQ - Inspeção</span><span>Gerado em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date())}</span></footer></article>;
-}
-
-function downloadBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
 }
