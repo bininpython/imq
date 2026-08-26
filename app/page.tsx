@@ -71,8 +71,6 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { void loadReports(); }, []);
-
   async function loadReports() {
     setLoadingReports(true);
     try {
@@ -86,6 +84,11 @@ export default function Home() {
       setLoadingReports(false);
     }
   }
+
+  useEffect(() => {
+    const task = window.setTimeout(() => { void loadReports(); }, 0);
+    return () => window.clearTimeout(task);
+  }, []);
 
   const reviewedCount = reviewed.length;
   const completion = Math.round((reviewedCount / ALL_EQUIPMENT.length) * 100);
@@ -155,6 +158,7 @@ export default function Home() {
           attachments.push({ id: result.attachment.id, name: file.name, type: file.type, size: file.size });
         }
         const { files: _files, ...deviationData } = deviation;
+        void _files;
         normalized.push({ ...deviationData, attachments });
       }
       const response = await fetch("/api/reports", {
@@ -263,7 +267,7 @@ export default function Home() {
         </div>
       </main>
 
-      <DeviationDialog open={!!dialogEquipment} target={dialogEquipment} form={form} setForm={setForm} files={formFiles} setFiles={setFormFiles} fileInputRef={fileInputRef} onClose={() => setDialogEquipment(null)} onAdd={addDeviation} />
+      <DeviationDialog key={dialogEquipment ? `${dialogEquipment.area}:${dialogEquipment.equipment}` : "closed"} open={!!dialogEquipment} target={dialogEquipment} form={form} setForm={setForm} files={formFiles} setFiles={setFormFiles} fileInputRef={fileInputRef} onClose={() => setDialogEquipment(null)} onAdd={addDeviation} />
       <ReportDialog report={selectedReport} onClose={() => setSelectedReport(null)} onPdf={printPdf} onCsv={exportCsv} onEmail={emailReport} />
       {selectedReport && <PrintReport report={selectedReport} />}
     </div>
@@ -366,13 +370,6 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
   const [highlightedDefect, setHighlightedDefect] = useState(0);
   const normalizedDefectQuery = normalizeSearch(defectQuery);
   const filteredDefects = DEFECTS.filter((item) => normalizeSearch(`${item.code} ${item.name} ${item.group}`).includes(normalizedDefectQuery));
-
-  useEffect(() => {
-    if (!open) return;
-    setDefectQuery("");
-    setDefectSearchOpen(false);
-    setHighlightedDefect(0);
-  }, [open, target?.area, target?.equipment]);
 
   function selectDefect(code: string) {
     const defect = DEFECTS.find((item) => item.code === code);

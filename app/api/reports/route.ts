@@ -4,7 +4,8 @@ import { shiftReports } from "../../../db/schema";
 
 export async function GET() {
   try {
-    const rows = await getDb().select().from(shiftReports).orderBy(desc(shiftReports.createdAt)).limit(100);
+    const db = await getDb();
+    const rows = await db.select().from(shiftReports).orderBy(desc(shiftReports.createdAt)).limit(100);
     return Response.json({ reports: rows.map((row) => ({ ...row, payload: JSON.parse(row.payload) })) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Não foi possível carregar os relatórios." }, { status: 500 });
@@ -23,7 +24,8 @@ export async function POST(request: Request) {
     const id = body.id || crypto.randomUUID();
     const deviations = Array.isArray(body.deviations) ? body.deviations : [];
     const payload = { ...(body.payload || {}), deviations };
-    const [report] = await getDb().insert(shiftReports).values({
+    const db = await getDb();
+    const [report] = await db.insert(shiftReports).values({
       id,
       reportDate: body.reportDate,
       shift: body.shift,

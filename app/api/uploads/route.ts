@@ -1,6 +1,6 @@
-import { env } from "cloudflare:workers";
 import { getDb } from "../../../db";
 import { attachments } from "../../../db/schema";
+import { getCloudflareEnv } from "../../../lib/cloudflare-env";
 
 const MAX_SIZE = 50 * 1024 * 1024;
 
@@ -21,8 +21,11 @@ export async function POST(request: Request) {
     const id = crypto.randomUUID();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
     const objectKey = `reports/${reportId}/${id}-${safeName}`;
+    const env = await getCloudflareEnv();
+    if (!env.BUCKET) throw new Error("O armazenamento de evidências não está configurado.");
     await env.BUCKET.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type } });
-    const [attachment] = await getDb().insert(attachments).values({
+    const db = await getDb();
+    const [attachment] = await db.insert(attachments).values({
       id, reportId, objectKey, fileName: file.name, contentType: file.type, size: file.size,
     }).returning();
     return Response.json({ attachment }, { status: 201 });

@@ -1,6 +1,8 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import "../node_modules/tailwindcss/index.css";
+@import "../node_modules/tw-animate-css/dist/tw-animate.css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
+@source "../app";
+@source "../components";
 
 :root {
   --background: #f3f3f3;
@@ -36,6 +38,9 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: Arial, Helvetica, sans-serif; }
 button { cursor: pointer; }
+.scrollbar-thin { scrollbar-width: thin; }
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-gutter-stable { scrollbar-gutter: stable; }
 [data-slot="card"], [data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="dialog-content"], [data-slot="badge"] { border-radius: 1px!important; box-shadow: none!important; }
 [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"] { background: #fff!important; border-color: #aaa!important; }
 [data-slot="input"]:focus-visible, [data-slot="textarea"]:focus-visible, [data-slot="select-trigger"]:focus-visible { border-color: #64206f!important; box-shadow: 0 0 0 1px #64206f!important; }
