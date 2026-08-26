@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { DEFECTS, DEFECT_GROUPS, EQUIPMENT_CODES, EQUIPMENT_CODE_BY_NAME } from "@/lib/inspection-codes";
 import {
-  downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, saveReport,
+  downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, getEvidenceContentType, saveReport,
   supabase, type Deviation, type StoredReport,
 } from "@/lib/imq-supabase";
 
@@ -61,8 +61,7 @@ export default function Home() {
   const [shiftFilter, setShiftFilter] = useState("todos");
   const [selectedReport, setSelectedReport] = useState<StoredReport | null>(null);
   const [reportDate, setReportDate] = useState(today());
-  const [shift, setShift] = useState("TN");
-  const [reporter, setReporter] = useState("");
+  const [inspectorName, setInspectorName] = useState("");
   const [generalObservation, setGeneralObservation] = useState("");
   const [reviewed, setReviewed] = useState<string[]>([]);
   const [deviations, setDeviations] = useState<Deviation[]>([]);
@@ -111,15 +110,11 @@ export default function Home() {
   const reviewedCount = reviewed.length;
   const completion = Math.round((reviewedCount / ALL_EQUIPMENT.length) * 100);
   const filteredReports = useMemo(() => reports.filter((report) => {
-    const haystack = `${report.reporter} ${report.shift} ${report.reportDate} ${report.payload.deviations.map((d) => `${d.area} ${d.equipment} ${d.equipmentCode || ""} ${d.divertedToEquipment || ""} ${d.divertedToEquipmentCode || ""} ${d.um} ${d.defectCode || ""} ${d.defectName || d.reason}`).join(" ")}`.toLowerCase();
+    const haystack = `${report.reporter} ${report.inspectorName || ""} ${report.shift} ${report.reportDate} ${report.payload.deviations.map((d) => `${d.area} ${d.equipment} ${d.equipmentCode || ""} ${d.divertedToEquipment || ""} ${d.divertedToEquipmentCode || ""} ${d.um} ${d.defectCode || ""} ${d.defectName || d.reason}`).join(" ")}`.toLowerCase();
     return (shiftFilter === "todos" || report.shift === shiftFilter) && haystack.includes(search.toLowerCase());
   }), [reports, search, shiftFilter]);
 
   function beginReport() {
-    if (authUser) {
-      setReporter(authUser.label);
-      setShift(authUser.shift);
-    }
     setView("new");
     setMobileNav(false);
   }
@@ -167,12 +162,14 @@ export default function Home() {
   }
 
   async function finalizeReport() {
-    if (!reporter.trim()) { toast.error("Informe o responsável pelo fechamento."); return; }
+    if (!authUser) { toast.error("Sua sessão expirou. Entre novamente."); return; }
+    const normalizedInspectorName = inspectorName.trim();
+    if (normalizedInspectorName.length < 2) { toast.error("Informe o nome do inspetor responsável pela inspeção."); return; }
     if (reviewedCount < ALL_EQUIPMENT.length) { toast.error(`Revise os ${ALL_EQUIPMENT.length - reviewedCount} equipamentos restantes.`); return; }
     setSaving(true);
     const reportId = crypto.randomUUID();
     try {
-      await saveReport({ id: reportId, reportDate, shift, reporter: reporter.trim(), reviewed, generalObservation, deviations });
+      await saveReport({ id: reportId, reportDate, shift: authUser.shift, reporter: authUser.label, inspectorName: normalizedInspectorName, reviewed, generalObservation, deviations });
       setReports(await fetchReports());
       resetDraft(); setView("reports");
       toast.success("Fechamento finalizado e salvo com sucesso.");
@@ -182,16 +179,16 @@ export default function Home() {
   }
 
   function resetDraft() {
-    setReportDate(today()); setShift("TN"); setReporter(""); setGeneralObservation(""); setReviewed([]); setDeviations([]);
+    setReportDate(today()); setInspectorName(""); setGeneralObservation(""); setReviewed([]); setDeviations([]);
   }
 
   function exportCsv(report: StoredReport) {
-    const header = ["Data", "Turno", "Responsável", "Gerência", "Cód. passagem", "Equipamento de passagem", "Cód. destino", "Equipamento de destino", "UM", "Cód. Defeito", "Defeito", "Observação", "Evidências"];
+    const header = ["Data", "Turno", "Responsável do turno", "Inspetor", "Gerência", "Cód. passagem", "Equipamento de passagem", "Cód. destino", "Equipamento de destino", "UM", "Cód. Defeito", "Defeito", "Observação", "Evidências"];
     const rows = report.payload.deviations.length ? report.payload.deviations.map((d) => [
-      report.reportDate, report.shift, report.reporter, d.area, d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I", d.equipment,
+      report.reportDate, report.shift, report.reporter, report.inspectorName || report.reporter, d.area, d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I", d.equipment,
       d.divertedToEquipmentCode || "—", d.divertedToEquipment || "Não informado", d.um, d.defectCode || "—", d.defectName || d.reason, d.observation,
       (d.attachments || []).map((a) => a.name).join(" | "),
-    ]) : [[report.reportDate, report.shift, report.reporter, "", "", "", "", "", "", "", "Sem desvios", report.payload.generalObservation || "", ""]];
+    ]) : [[report.reportDate, report.shift, report.reporter, report.inspectorName || report.reporter, "", "", "", "", "", "", "", "Sem desvios", report.payload.generalObservation || "", ""]];
     const csv = [header, ...rows].map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(";")).join("\n");
     downloadBlob(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), `IMQ_${report.reportDate}_${report.shift}.csv`);
     toast.success("Planilha exportada.");
@@ -215,7 +212,7 @@ export default function Home() {
   }
   function emailReport(report: StoredReport) {
     const subject = encodeURIComponent(`IMQ | Fechamento ${report.shift} - ${formatDate(report.reportDate)}`);
-    const body = encodeURIComponent(`Relatório de turno IMQ\n\nData: ${formatDate(report.reportDate)}\nTurno: ${report.shift}\nResponsável: ${report.reporter}\nDesvios: ${report.deviationCount}\n\nO PDF pode ser gerado no botão Exportar PDF e anexado a esta mensagem.`);
+    const body = encodeURIComponent(`Relatório de turno IMQ\n\nData: ${formatDate(report.reportDate)}\nTurno: ${report.shift}\nResponsável do turno: ${report.reporter}\nInspetor: ${report.inspectorName || report.reporter}\nDesvios: ${report.deviationCount}\n\nO PDF pode ser gerado no botão Exportar PDF e anexado a esta mensagem.`);
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   }
 
@@ -255,7 +252,8 @@ export default function Home() {
               <Card className="report-header-card"><CardContent className="report-meta">
                 <div><Label htmlFor="report-date">Data do fechamento</Label><Input id="report-date" type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} /></div>
                 <div><Label>Turno</Label><Input value={`${authUser.shift} • ${authUser.shift === "TN" ? "Turno da Noite" : authUser.shift === "TM" ? "Turno da Manhã" : "Turno da Tarde"}`} readOnly /></div>
-                <div><Label htmlFor="reporter">Responsável</Label><Input id="reporter" value={authUser.label} readOnly /></div>
+                <div><Label htmlFor="reporter">Responsável do turno</Label><Input id="reporter" value={authUser.label} readOnly /></div>
+                <div><Label htmlFor="inspector-name">Nome do inspetor</Label><Input id="inspector-name" value={inspectorName} onChange={(event) => setInspectorName(event.target.value)} placeholder="Digite o nome do inspetor" maxLength={120} /></div>
               </CardContent></Card>
               <div className="progress-card"><div><strong>{completion}% concluído</strong><span>{reviewedCount} de {ALL_EQUIPMENT.length} equipamentos revisados</span></div><Progress value={completion} /><Button variant="outline" size="sm" onClick={() => setReviewed([...ALL_EQUIPMENT])}><Check /> Marcar restantes sem desvio</Button></div>
 
@@ -304,8 +302,8 @@ function AuthLoading() {
   return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMQ</div><strong>Carregando ambiente seguro...</strong></div></main>;
 }
 
-function getShiftUser(user: { id: string; user_metadata?: { shift?: unknown; display_name?: unknown } } | undefined): AuthUser | null {
-  const shift = user?.user_metadata?.shift;
+function getShiftUser(user: { id: string; app_metadata?: { shift?: unknown; display_name?: unknown }; user_metadata?: { shift?: unknown; display_name?: unknown } } | undefined): AuthUser | null {
+  const shift = user?.app_metadata?.shift || user?.user_metadata?.shift;
   if (shift !== "TN" && shift !== "TM" && shift !== "TT") return null;
   return { id: user.id, shift, label: SHIFT_ACCOUNTS[shift].label };
 }
@@ -440,17 +438,21 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
 
   function addEvidence(selected: FileList | null) {
     const incoming = Array.from(selected || []);
-    const invalidType = incoming.find((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/"));
+    const invalidType = incoming.find((file) => !getEvidenceContentType(file));
     const oversized = incoming.find((file) => file.size > 50 * 1024 * 1024);
     if (invalidType) {
-      toast.error(`${invalidType.name} não é uma imagem ou vídeo compatível.`);
+      toast.error(`${invalidType.name} não é uma imagem ou vídeo compatível. Use JPG, PNG, WEBP, HEIC, MP4 ou MOV.`);
       return;
     }
     if (oversized) {
       toast.error(`${oversized.name} excede o limite de 50 MB.`);
       return;
     }
-    setFiles((current) => [...current, ...incoming].slice(0, 6));
+    setFiles((current) => {
+      const next = [...current, ...incoming].slice(0, 6);
+      if (current.length + incoming.length > 6) toast.info("Foram mantidas as 6 primeiras evidências do desvio.");
+      return next;
+    });
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -487,9 +489,9 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
 }
 
 function ReportDialog({ report, onClose, onPdf, onCsv, onEmail, onEvidence }: { report: StoredReport | null; onClose: () => void; onPdf: (r: StoredReport) => void; onCsv: (r: StoredReport) => void; onEmail: (r: StoredReport) => void; onEvidence: (attachment: NonNullable<Deviation["attachments"]>[number]) => void }) {
-  return <Dialog open={!!report} onOpenChange={(open) => !open && onClose()}>{report && <DialogContent className="report-dialog"><DialogHeader><div className="dialog-kicker"><FileText /> RELATÓRIO FINALIZADO</div><DialogTitle>{formatDate(report.reportDate)} • Turno {report.shift}</DialogTitle><DialogDescription>Responsável: {report.reporter}</DialogDescription></DialogHeader><div className="report-summary"><div><span>Gerências</span><strong>04</strong></div><div><span>Equipamentos</span><strong>18</strong></div><div><span>Desvios</span><strong>{report.deviationCount}</strong></div></div>{report.payload.deviations.length ? <div className="dialog-deviations">{report.payload.deviations.map((d) => <div key={d.id}><div className="deviation-route"><Badge variant="outline">{d.area}</Badge><span><small>PASSAGEM</small><strong>{d.equipment} • CÓD. {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</strong></span><ChevronRight /><span><small>DESTINO</small><strong>{d.divertedToEquipment || "Não informado"} • CÓD. {d.divertedToEquipmentCode || "—"}</strong></span></div><b className="mono">{d.um}</b><span><span className="defect-code">{d.defectCode || "—"}</span> {d.defectName || d.reason}</span><p>{d.observation || "Sem observação adicional."}</p>{(d.attachments || []).length > 0 && <div className="evidence-links">{d.attachments!.map((attachment) => <button type="button" key={attachment.id || attachment.name} onClick={() => onEvidence(attachment)}><Download /><span>{attachment.name}</span><small>{formatBytes(attachment.size)}</small></button>)}</div>}</div>)}</div> : <div className="all-clear"><CheckCircle2 /><div><strong>Turno sem desvios</strong><span>Todos os equipamentos foram revisados.</span></div></div>}{report.payload.generalObservation && <div className="report-note"><strong>Observação geral</strong><p>{report.payload.generalObservation}</p></div>}<DialogFooter className="export-actions"><Button variant="outline" onClick={() => onCsv(report)}><FileSpreadsheet /> Planilha</Button><Button variant="outline" onClick={() => onPdf(report)}><Download /> PDF</Button><Button onClick={() => onEmail(report)}><Mail /> Enviar por e-mail</Button></DialogFooter></DialogContent>}</Dialog>;
+  return <Dialog open={!!report} onOpenChange={(open) => !open && onClose()}>{report && <DialogContent className="report-dialog"><DialogHeader><div className="dialog-kicker"><FileText /> RELATÓRIO FINALIZADO</div><DialogTitle>{formatDate(report.reportDate)} • Turno {report.shift}</DialogTitle><DialogDescription>Responsável: {report.reporter} • Inspetor: {report.inspectorName || report.reporter}</DialogDescription></DialogHeader><div className="report-summary"><div><span>Gerências</span><strong>04</strong></div><div><span>Equipamentos</span><strong>18</strong></div><div><span>Desvios</span><strong>{report.deviationCount}</strong></div></div>{report.payload.deviations.length ? <div className="dialog-deviations">{report.payload.deviations.map((d) => <div key={d.id}><div className="deviation-route"><Badge variant="outline">{d.area}</Badge><span><small>PASSAGEM</small><strong>{d.equipment} • CÓD. {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</strong></span><ChevronRight /><span><small>DESTINO</small><strong>{d.divertedToEquipment || "Não informado"} • CÓD. {d.divertedToEquipmentCode || "—"}</strong></span></div><b className="mono">{d.um}</b><span><span className="defect-code">{d.defectCode || "—"}</span> {d.defectName || d.reason}</span><p>{d.observation || "Sem observação adicional."}</p>{(d.attachments || []).length > 0 && <div className="evidence-links">{d.attachments!.map((attachment) => <button type="button" key={attachment.id || attachment.name} onClick={() => onEvidence(attachment)}><Download /><span>{attachment.name}</span><small>{formatBytes(attachment.size)}</small></button>)}</div>}</div>)}</div> : <div className="all-clear"><CheckCircle2 /><div><strong>Turno sem desvios</strong><span>Todos os equipamentos foram revisados.</span></div></div>}{report.payload.generalObservation && <div className="report-note"><strong>Observação geral</strong><p>{report.payload.generalObservation}</p></div>}<DialogFooter className="export-actions"><Button variant="outline" onClick={() => onCsv(report)}><FileSpreadsheet /> Planilha</Button><Button variant="outline" onClick={() => onPdf(report)}><Download /> PDF</Button><Button onClick={() => onEmail(report)}><Mail /> Enviar por e-mail</Button></DialogFooter></DialogContent>}</Dialog>;
 }
 
 function PrintReport({ report }: { report: StoredReport }) {
-  return <article className="print-report"><header><div className="print-logo">IMQ</div><div><h1>RELATÓRIO DE INSPEÇÃO</h1><p>Laminação a Frio Central • Fechamento de Turno</p></div></header><section className="print-meta"><div><span>Data</span><strong>{formatDate(report.reportDate)}</strong></div><div><span>Turno</span><strong>{report.shift}</strong></div><div><span>Responsável</span><strong>{report.reporter}</strong></div><div><span>Status</span><strong>Finalizado</strong></div></section><h2>Resumo operacional</h2><div className="print-summary"><div><b>04</b><span>Gerências</span></div><div><b>18</b><span>Equipamentos</span></div><div><b>{report.deviationCount}</b><span>Desvios</span></div></div><h2>Ocorrências registradas</h2>{report.payload.deviations.length ? <table><thead><tr><th>Gerência</th><th>Passagem / cód.</th><th>Destino / cód.</th><th>UM</th><th>Cód. defeito</th><th>Defeito</th><th>Observação</th></tr></thead><tbody>{report.payload.deviations.map((d) => <tr key={d.id}><td>{d.area}</td><td>{d.equipment} / {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</td><td>{d.divertedToEquipment || "Não informado"} / {d.divertedToEquipmentCode || "—"}</td><td>{d.um}</td><td>{d.defectCode || "—"}</td><td>{d.defectName || d.reason}</td><td>{d.observation || "—"}</td></tr>)}</tbody></table> : <div className="print-clear">✓ Todos os equipamentos revisados, sem desvios.</div>}{report.payload.generalObservation && <section className="print-observation"><h2>Observação geral</h2><p>{report.payload.generalObservation}</p></section>}<footer><span>IMQ - Inspeção</span><span>Gerado em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date())}</span></footer></article>;
+  return <article className="print-report"><header><div className="print-logo">IMQ</div><div><h1>RELATÓRIO DE INSPEÇÃO</h1><p>Laminação a Frio Central • Fechamento de Turno</p></div></header><section className="print-meta"><div><span>Data</span><strong>{formatDate(report.reportDate)}</strong></div><div><span>Turno</span><strong>{report.shift}</strong></div><div><span>Responsável</span><strong>{report.reporter}</strong></div><div><span>Inspetor</span><strong>{report.inspectorName || report.reporter}</strong></div><div><span>Status</span><strong>Finalizado</strong></div></section><h2>Resumo operacional</h2><div className="print-summary"><div><b>04</b><span>Gerências</span></div><div><b>18</b><span>Equipamentos</span></div><div><b>{report.deviationCount}</b><span>Desvios</span></div></div><h2>Ocorrências registradas</h2>{report.payload.deviations.length ? <table><thead><tr><th>Gerência</th><th>Passagem / cód.</th><th>Destino / cód.</th><th>UM</th><th>Cód. defeito</th><th>Defeito</th><th>Observação</th></tr></thead><tbody>{report.payload.deviations.map((d) => <tr key={d.id}><td>{d.area}</td><td>{d.equipment} / {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</td><td>{d.divertedToEquipment || "Não informado"} / {d.divertedToEquipmentCode || "—"}</td><td>{d.um}</td><td>{d.defectCode || "—"}</td><td>{d.defectName || d.reason}</td><td>{d.observation || "—"}</td></tr>)}</tbody></table> : <div className="print-clear">✓ Todos os equipamentos revisados, sem desvios.</div>}{report.payload.generalObservation && <section className="print-observation"><h2>Observação geral</h2><p>{report.payload.generalObservation}</p></section>}<footer><span>IMQ - Inspeção | developed by Abner Lucas</span><span>Gerado em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date())}</span></footer></article>;
 }

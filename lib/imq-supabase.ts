@@ -3,6 +3,22 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL = "https://lqadpxkngnryrfalrrjv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_dEOw8CNPoB0Y7FQe_-y71w_LAHXcYxY";
 const EVIDENCE_BUCKET = "imq-evidencias";
+const EVIDENCE_CONTENT_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  heic: "image/heic",
+  heif: "image/heif",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  mpeg: "video/mpeg",
+  mpg: "video/mpeg",
+};
+const SUPPORTED_EVIDENCE_CONTENT_TYPES = new Set(Object.values(EVIDENCE_CONTENT_TYPES));
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
@@ -47,6 +63,7 @@ export type StoredReport = {
   reportDate: string;
   shift: string;
   reporter: string;
+  inspectorName: string;
   status: string;
   deviationCount: number;
   createdAt: string;
@@ -58,6 +75,7 @@ type ReportRow = {
   report_date: string;
   shift: string;
   reporter: string;
+  inspector_name?: string;
   status: string;
   reviewed: unknown;
   general_observation: string;
@@ -88,7 +106,7 @@ export async function fetchReports(): Promise<StoredReport[]> {
   const { data, error } = await supabase
     .from("imq_reports")
     .select(`
-      id, report_date, shift, reporter, status, reviewed,
+      id, report_date, shift, reporter, inspector_name, status, reviewed,
       general_observation, deviation_count, created_at,
       deviations:imq_deviations(
         id, area, passage_equipment, passage_equipment_code,
@@ -111,6 +129,7 @@ export async function saveReport(input: {
   reportDate: string;
   shift: string;
   reporter: string;
+  inspectorName: string;
   reviewed: string[];
   generalObservation: string;
   deviations: Deviation[];
@@ -125,19 +144,23 @@ export async function saveReport(input: {
     for (const deviation of input.deviations) {
       const attachments = [] as Array<Record<string, unknown>>;
       for (const file of deviation.files) {
+        const contentType = getEvidenceContentType(file);
+        if (!contentType) throw new Error(`${file.name} não é uma imagem ou vídeo compatível.`);
+
         const attachmentId = crypto.randomUUID();
         const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]/g, "-");
         const storagePath = `reports/${userData.user.id}/${input.id}/${deviation.id}/${attachmentId}-${safeName}`;
+        const uploadBody = await fileToUploadBlob(file, contentType);
         const { error: uploadError } = await supabase.storage
           .from(EVIDENCE_BUCKET)
-          .upload(storagePath, file, { contentType: file.type, cacheControl: "3600", upsert: false });
+          .upload(storagePath, uploadBody, { contentType, cacheControl: "3600", upsert: false });
         if (uploadError) throw new Error(`Falha ao enviar ${file.name}: ${uploadError.message}`);
         uploadedPaths.push(storagePath);
         attachments.push({
           id: attachmentId,
           storage_path: storagePath,
           file_name: file.name,
-          content_type: file.type,
+          content_type: contentType,
           size_bytes: file.size,
         });
       }
@@ -163,6 +186,7 @@ export async function saveReport(input: {
         report_date: input.reportDate,
         shift: input.shift,
         reporter: input.reporter,
+        inspector_name: input.inspectorName,
         status: "finalizado",
         reviewed: input.reviewed,
         general_observation: input.generalObservation,
@@ -193,11 +217,21 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const purple: [number, number, number] = [100, 32, 111];
   const orange: [number, number, number] = [243, 111, 33];
+  const black: [number, number, number] = [20, 20, 20];
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+
+  function ensureSpace(y: number, height: number) {
+    if (y + height <= pageHeight - 18) return y;
+    doc.addPage();
+    return 18;
+  }
 
   doc.setFillColor(...purple);
-  doc.rect(0, 0, 297, 27, "F");
+  doc.rect(0, 0, pageWidth, 27, "F");
   doc.setFillColor(...orange);
-  doc.rect(0, 27, 297, 2, "F");
+  doc.rect(0, 27, pageWidth, 2, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(17);
@@ -206,13 +240,14 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
   doc.setFontSize(9);
   doc.text("Laminacao a Frio Central - Fechamento de Turno", 14, 19);
 
-  doc.setTextColor(25, 25, 25);
-  doc.setFontSize(10);
+  doc.setTextColor(...black);
+  doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
-  doc.text(`Data: ${formatDate(report.reportDate)}`, 14, 39);
-  doc.text(`Turno: ${report.shift}`, 72, 39);
-  doc.text(`Responsavel: ${report.reporter}`, 112, 39);
-  doc.text(`Desvios: ${report.deviationCount}`, 250, 39);
+  doc.text(`Data: ${formatDate(report.reportDate)}`, 14, 38);
+  doc.text(`Turno: ${report.shift}`, 68, 38);
+  doc.text(`Responsavel do turno: ${report.reporter}`, 104, 38);
+  doc.text(`Inspetor: ${report.inspectorName || report.reporter}`, 190, 38);
+  doc.text(`Desvios: ${report.deviationCount}`, 268, 38);
 
   const body = report.payload.deviations.length
     ? report.payload.deviations.map((item) => [
@@ -240,25 +275,75 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
       3: { cellWidth: 28 }, 4: { cellWidth: 20 }, 5: { cellWidth: 42 },
       6: { cellWidth: 78 }, 7: { cellWidth: 17, halign: "center" },
     },
-    didDrawPage: ({ pageNumber }) => {
-      doc.setFontSize(7);
-      doc.setTextColor(90, 90, 90);
-      doc.text(`IMQ - Inspecao | Gerado em ${new Date().toLocaleString("pt-BR")}`, 14, 204);
-      doc.text(`Pagina ${pageNumber}`, 279, 204, { align: "right" });
-    },
   });
 
-  const finalY = (doc as typeof doc & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 55;
-  if (report.payload.generalObservation && finalY < 185) {
+  let cursorY = ((doc as typeof doc & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 55) + 9;
+  if (report.payload.generalObservation) {
+    cursorY = ensureSpace(cursorY, 24);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...purple);
-    doc.text("Observacao geral", 14, finalY + 9);
+    doc.text("Observacao geral", margin, cursorY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(40, 40, 40);
-    doc.text(doc.splitTextToSize(report.payload.generalObservation, 265), 14, finalY + 15);
+    doc.text(doc.splitTextToSize(report.payload.generalObservation, 265), margin, cursorY + 6);
+    cursorY += 24;
   }
 
-  doc.save(`IMQ_${report.reportDate}_${report.shift}.pdf`);
+  const photoItems = report.payload.deviations.flatMap((deviation) =>
+    (deviation.attachments || [])
+      .filter((attachment) => attachment.type.startsWith("image/"))
+      .map((attachment) => ({ deviation, attachment }))
+  );
+
+  if (photoItems.length) {
+    cursorY = ensureSpace(cursorY + 2, 18);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...purple);
+    doc.text("Evidencias fotograficas", margin, cursorY);
+    cursorY += 8;
+
+    for (const item of photoItems) {
+      cursorY = ensureSpace(cursorY, 78);
+      doc.setDrawColor(185, 185, 185);
+      doc.setFillColor(248, 248, 248);
+      doc.roundedRect(margin, cursorY, pageWidth - margin * 2, 72, 1, 1, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...black);
+      const caption = `${item.deviation.area} | ${item.deviation.equipment} -> ${item.deviation.divertedToEquipment || "-"} | UM ${item.deviation.um} | Defeito ${item.deviation.defectCode || "-"} - ${item.deviation.defectName || item.deviation.reason}`;
+      doc.text(doc.splitTextToSize(caption, pageWidth - margin * 2 - 8), margin + 4, cursorY + 7);
+
+      try {
+        const image = await loadPdfImage(item.attachment);
+        if (!image) throw new Error("Formato de imagem não suportado no PDF.");
+        const maxWidth = pageWidth - margin * 2 - 8;
+        const maxHeight = 54;
+        const ratio = Math.min(maxWidth / image.width, maxHeight / image.height);
+        const imageWidth = image.width * ratio;
+        const imageHeight = image.height * ratio;
+        doc.addImage(image.dataUrl, image.format, margin + 4, cursorY + 15, imageWidth, imageHeight, undefined, "FAST");
+      } catch (error) {
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(120, 64, 0);
+        doc.text(`Imagem indisponivel no PDF: ${error instanceof Error ? error.message : item.attachment.name}`, margin + 4, cursorY + 30);
+      }
+
+      cursorY += 78;
+    }
+  }
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(90, 90, 90);
+    doc.text(`IMQ - Inspecao | developed by Abner Lucas | Gerado em ${new Date().toLocaleString("pt-BR")}`, margin, pageHeight - 7);
+    doc.text(`Pagina ${page} de ${pageCount}`, pageWidth - margin, pageHeight - 7, { align: "right" });
+  }
+
+  downloadBlob(doc.output("blob"), `IMQ_${report.reportDate}_${report.shift}.pdf`);
 }
 
 export function downloadBlob(blob: Blob, name: string): void {
@@ -273,12 +358,66 @@ export function downloadBlob(blob: Blob, name: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+export function getEvidenceContentType(file: File): string | null {
+  const normalizedType = (file.type || "").toLowerCase();
+  if (SUPPORTED_EVIDENCE_CONTENT_TYPES.has(normalizedType)) return normalizedType;
+
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  return extension ? EVIDENCE_CONTENT_TYPES[extension] || null : null;
+}
+
+async function fileToUploadBlob(file: File, contentType: string): Promise<Blob> {
+  const buffer = await file.arrayBuffer();
+  return new Blob([buffer], { type: contentType });
+}
+
+async function loadPdfImage(attachment: AttachmentRef): Promise<{ dataUrl: string; width: number; height: number; format: "JPEG" | "PNG" | "WEBP" } | null> {
+  if (!attachment.storagePath) return null;
+  const format = getPdfImageFormat(attachment.type, attachment.name);
+  if (!format) return null;
+
+  const { data, error } = await supabase.storage.from(EVIDENCE_BUCKET).download(attachment.storagePath);
+  if (error) throw error;
+
+  const dataUrl = await blobToDataUrl(data);
+  const dimensions = await getImageDimensions(dataUrl);
+  return { dataUrl, format, ...dimensions };
+}
+
+function getPdfImageFormat(contentType: string, fileName: string): "JPEG" | "PNG" | "WEBP" | null {
+  const normalized = contentType.toLowerCase();
+  const extension = fileName.split(".").pop()?.toLowerCase();
+  if (normalized.includes("jpeg") || normalized.includes("jpg") || extension === "jpg" || extension === "jpeg") return "JPEG";
+  if (normalized.includes("png") || extension === "png") return "PNG";
+  if (normalized.includes("webp") || extension === "webp") return "WEBP";
+  return null;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Falha ao ler a imagem."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function getImageDimensions(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+    image.onerror = () => reject(new Error("Falha ao abrir a imagem."));
+    image.src = src;
+  });
+}
+
 function mapReportRow(row: ReportRow): StoredReport {
   return {
     id: row.id,
     reportDate: row.report_date,
     shift: row.shift,
     reporter: row.reporter,
+    inspectorName: row.inspector_name || row.reporter,
     status: row.status,
     deviationCount: row.deviation_count,
     createdAt: row.created_at,
