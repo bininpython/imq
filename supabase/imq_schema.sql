@@ -105,6 +105,8 @@ declare
   v_deviation jsonb;
   v_attachment jsonb;
   v_deviation_id uuid;
+  v_shift text;
+  v_reporter text;
 begin
   if p_report is null or jsonb_typeof(p_report) <> 'object' then
     raise exception 'Relatório inválido.';
@@ -114,6 +116,12 @@ begin
     raise exception 'A lista de desvios deve ser um array.';
   end if;
 
+  v_shift := auth.jwt()->'user_metadata'->>'shift';
+  v_reporter := auth.jwt()->'user_metadata'->>'display_name';
+  if v_shift not in ('TN', 'TM', 'TT') or nullif(btrim(v_reporter), '') is null then
+    raise exception 'Conta de turno IMQ inválida.';
+  end if;
+
   insert into public.imq_reports (
     id, owner_id, report_date, shift, reporter, status, reviewed,
     general_observation, deviation_count
@@ -121,8 +129,8 @@ begin
     coalesce(nullif(p_report->>'id', '')::uuid, gen_random_uuid()),
     (select auth.uid()),
     (p_report->>'report_date')::date,
-    p_report->>'shift',
-    btrim(p_report->>'reporter'),
+    v_shift,
+    v_reporter,
     coalesce(nullif(p_report->>'status', ''), 'finalizado'),
     coalesce(p_report->'reviewed', '[]'::jsonb),
     coalesce(p_report->>'general_observation', ''),

@@ -36,6 +36,14 @@ const ALL_EQUIPMENT = AREAS.flatMap((area) => area.equipment.map((equipment) => 
 const DEVIATION_DESTINATIONS = [...EQUIPMENT_CODES, { code: "N/I", equipment: "EB3" }]
   .sort((a, b) => a.equipment.localeCompare(b.equipment));
 
+const SHIFT_ACCOUNTS = {
+  TN: { email: "tn@imq.app", label: "Inspetor Líder TN" },
+  TM: { email: "tm@imq.app", label: "Inspetor Líder TM" },
+  TT: { email: "tt@imq.app", label: "Inspetor Líder TT" },
+} as const;
+type ShiftCode = keyof typeof SHIFT_ACCOUNTS;
+type AuthUser = { id: string; shift: ShiftCode; label: string };
+
 const today = () => new Date().toISOString().slice(0, 10);
 const formatDate = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(`${value}T12:00:00`));
 const formatDateTime = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
@@ -44,7 +52,7 @@ const normalizeSearch = (value: string) => value.normalize("NFD").replace(/[\u03
 
 export default function Home() {
   const [authReady, setAuthReady] = useState(false);
-  const [authUser, setAuthUser] = useState<{ id: string; email?: string } | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [view, setView] = useState<"dashboard" | "new" | "reports" | "library">("dashboard");
   const [mobileNav, setMobileNav] = useState(false);
   const [reports, setReports] = useState<StoredReport[]>([]);
@@ -69,11 +77,11 @@ export default function Home() {
     let mounted = true;
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setAuthUser(data.session?.user ? { id: data.session.user.id, email: data.session.user.email } : null);
+      setAuthUser(getShiftUser(data.session?.user));
       setAuthReady(true);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+      setAuthUser(getShiftUser(session?.user));
       setAuthReady(true);
     });
     return () => {
@@ -108,7 +116,10 @@ export default function Home() {
   }), [reports, search, shiftFilter]);
 
   function beginReport() {
-    if (!reporter && authUser?.email) setReporter(authUser.email.split("@")[0].replace(/[._-]+/g, " "));
+    if (authUser) {
+      setReporter(authUser.label);
+      setShift(authUser.shift);
+    }
     setView("new");
     setMobileNav(false);
   }
@@ -224,7 +235,8 @@ export default function Home() {
         </nav>
         <div className="sidebar-foot">
           <div className="security-note"><ShieldCheck /><div><strong>Ambiente protegido</strong><span>Dados operacionais seguros</span></div></div>
-          <div className="profile"><div className="avatar">IMQ</div><div><strong>{authUser.email?.split("@")[0] || "Usuário IMQ"}</strong><span>{authUser.email || "Conta autenticada"}</span></div><Button variant="ghost" size="icon" title="Sair" onClick={() => void supabase.auth.signOut()}><LogOut /></Button></div>
+          <div className="profile"><div className="avatar">{authUser.shift}</div><div><strong>{authUser.label}</strong><span>Turno {authUser.shift}</span></div><Button variant="ghost" size="icon" title="Sair" aria-label="Sair do sistema" onClick={() => void supabase.auth.signOut()}><LogOut /></Button></div>
+          <div className="developer-credit">developed by Abner Lucas</div>
         </div>
       </aside>
 
@@ -242,8 +254,8 @@ export default function Home() {
               <div className="page-heading"><div><p className="eyebrow">ROTINA OPERACIONAL</p><h2>Fechamento da inspeção</h2><p>Revise os equipamentos e registre as unidades metálicas desviadas.</p></div><Button variant="outline" onClick={() => setView("dashboard")}><ArrowLeft /> Voltar</Button></div>
               <Card className="report-header-card"><CardContent className="report-meta">
                 <div><Label htmlFor="report-date">Data do fechamento</Label><Input id="report-date" type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} /></div>
-                <div><Label>Turno</Label><Select value={shift} onValueChange={setShift}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="TN">TN • Turno da Noite</SelectItem><SelectItem value="TM">TM • Turno da Manhã</SelectItem><SelectItem value="TT">TT • Turno da Tarde</SelectItem></SelectContent></Select></div>
-                <div><Label htmlFor="reporter">Responsável</Label><Input id="reporter" placeholder="Nome e sobrenome" value={reporter} onChange={(e) => setReporter(e.target.value)} /></div>
+                <div><Label>Turno</Label><Input value={`${authUser.shift} • ${authUser.shift === "TN" ? "Turno da Noite" : authUser.shift === "TM" ? "Turno da Manhã" : "Turno da Tarde"}`} readOnly /></div>
+                <div><Label htmlFor="reporter">Responsável</Label><Input id="reporter" value={authUser.label} readOnly /></div>
               </CardContent></Card>
               <div className="progress-card"><div><strong>{completion}% concluído</strong><span>{reviewedCount} de {ALL_EQUIPMENT.length} equipamentos revisados</span></div><Progress value={completion} /><Button variant="outline" size="sm" onClick={() => setReviewed([...ALL_EQUIPMENT])}><Check /> Marcar restantes sem desvio</Button></div>
 
@@ -278,6 +290,7 @@ export default function Home() {
           {view === "reports" && <ReportsView reports={filteredReports} search={search} setSearch={setSearch} shiftFilter={shiftFilter} setShiftFilter={setShiftFilter} onView={setSelectedReport} onCsv={exportCsv} onPdf={printPdf} onEmail={emailReport} onNew={beginReport} />}
           {view === "library" && <CodeLibrary />}
         </div>
+        <footer className="app-footer">developed by Abner Lucas</footer>
       </main>
 
       <DeviationDialog key={dialogEquipment ? `${dialogEquipment.area}:${dialogEquipment.equipment}` : "closed"} open={!!dialogEquipment} target={dialogEquipment} form={form} setForm={setForm} files={formFiles} setFiles={setFormFiles} fileInputRef={fileInputRef} onClose={() => setDialogEquipment(null)} onAdd={addDeviation} />
@@ -291,44 +304,41 @@ function AuthLoading() {
   return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMQ</div><strong>Carregando ambiente seguro...</strong></div></main>;
 }
 
+function getShiftUser(user: { id: string; user_metadata?: { shift?: unknown; display_name?: unknown } } | undefined): AuthUser | null {
+  const shift = user?.user_metadata?.shift;
+  if (shift !== "TN" && shift !== "TM" && shift !== "TT") return null;
+  return { id: user.id, shift, label: SHIFT_ACCOUNTS[shift].label };
+}
+
 function AuthScreen() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [selectedShift, setSelectedShift] = useState<ShiftCode>("TN");
+  const [accessCode, setAccessCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email.trim() || password.length < 8 || (mode === "signup" && name.trim().length < 2)) {
-      setMessage("Preencha os campos corretamente. A senha deve ter pelo menos 8 caracteres.");
+    if (!/^\d{6}$/.test(accessCode)) {
+      setMessage("Informe o código de acesso com 6 números.");
       return;
     }
 
     setSubmitting(true);
     setMessage("");
     try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { data: { full_name: name.trim() } },
-        });
-        if (error) throw error;
-        if (!data.session) setMessage("Cadastro criado. Confirme o e-mail recebido para entrar no IMQ.");
-      }
+      const { error } = await supabase.auth.signInWithPassword({
+        email: SHIFT_ACCOUNTS[selectedShift].email,
+        password: accessCode,
+      });
+      if (error) throw error;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Não foi possível autenticar.");
+      setMessage(error instanceof Error && error.message !== "Invalid login credentials" ? error.message : "Turno ou código de acesso incorreto.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><div className="brand-mark">IMQ</div><div><strong>IMQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div><div className="auth-heading"><LockKeyhole /><div><h1>{mode === "login" ? "Acessar sistema" : "Criar acesso"}</h1><p>Entre com sua conta segura para acessar relatórios e evidências.</p></div></div><form onSubmit={submit}>{mode === "signup" && <div><Label htmlFor="auth-name">Nome completo</Label><Input id="auth-name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome e sobrenome" /></div>}<div><Label htmlFor="auth-email">E-mail</Label><Input id="auth-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nome@empresa.com" /></div><div><Label htmlFor="auth-password">Senha</Label><Input id="auth-password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo de 8 caracteres" /></div>{message && <p className="auth-message">{message}</p>}<Button type="submit" disabled={submitting}>{submitting ? "Aguarde..." : mode === "login" ? "Entrar no IMQ" : "Criar conta"}</Button></form><button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setMessage(""); }}>{mode === "login" ? "Primeiro acesso? Criar conta" : "Já possui conta? Entrar"}</button><p className="auth-security"><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS.</p></section></main>;
+  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><div className="brand-mark">IMQ</div><div><strong>IMQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div><div className="auth-heading"><LockKeyhole /><div><h1>Acessar sistema</h1><p>Selecione seu turno e informe o código numérico de acesso.</p></div></div><form onSubmit={submit}><fieldset className="shift-login"><legend>Turno de trabalho</legend>{(Object.keys(SHIFT_ACCOUNTS) as ShiftCode[]).map((shiftCode) => <button type="button" key={shiftCode} className={selectedShift === shiftCode ? "selected" : ""} aria-pressed={selectedShift === shiftCode} onClick={() => { setSelectedShift(shiftCode); setMessage(""); }}><strong>{shiftCode}</strong><span>{shiftCode === "TN" ? "Noite" : shiftCode === "TM" ? "Manhã" : "Tarde"}</span></button>)}</fieldset><div><Label htmlFor="access-code">Código de acesso</Label><Input id="access-code" className="access-code" type="password" inputMode="numeric" autoComplete="current-password" maxLength={6} value={accessCode} onChange={(event) => setAccessCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" /></div>{message && <p className="auth-message">{message}</p>}<Button type="submit" disabled={submitting}>{submitting ? "Verificando..." : `Entrar como ${selectedShift}`}</Button></form><p className="auth-identity">Acesso: <strong>{SHIFT_ACCOUNTS[selectedShift].label}</strong></p><p className="auth-security"><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS.</p><p className="auth-developer">developed by Abner Lucas</p></section></main>;
 }
 
 function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
