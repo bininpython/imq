@@ -1,5 +1,5 @@
 {
-  "name": "imq-inspecao",
+  "name": "imiq-inspecao",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -64,5 +64,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "displayName": "IMQ - Inspeção"
+  "displayName": "IMIQ - Inspeção"
 }

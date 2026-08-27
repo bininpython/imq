@@ -173,7 +173,7 @@ begin
   where account.user_id = (select auth.uid());
 
   if v_shift not in ('TN', 'TM', 'TT') or nullif(btrim(v_reporter), '') is null then
-    raise exception 'Conta de turno IMQ inválida.';
+    raise exception 'Conta de turno IMIQ inválida.';
   end if;
 
   v_inspector_name := coalesce(nullif(btrim(p_report->>'inspector_name'), ''), v_reporter);

@@ -36,6 +36,13 @@ export type AttachmentRef = {
   storagePath?: string;
 };
 
+export type EvidenceFile = {
+  name: string;
+  type: string;
+  size: number;
+  blob: Blob;
+};
+
 export type Deviation = {
   id: string;
   area: string;
@@ -48,7 +55,7 @@ export type Deviation = {
   divertedToEquipment?: string;
   divertedToEquipmentCode?: string;
   observation: string;
-  files: File[];
+  files: EvidenceFile[];
   attachments?: AttachmentRef[];
 };
 
@@ -150,10 +157,9 @@ export async function saveReport(input: {
         const attachmentId = crypto.randomUUID();
         const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]/g, "-");
         const storagePath = `reports/${userData.user.id}/${input.id}/${deviation.id}/${attachmentId}-${safeName}`;
-        const uploadBody = await fileToUploadBlob(file, contentType);
         const { error: uploadError } = await supabase.storage
           .from(EVIDENCE_BUCKET)
-          .upload(storagePath, uploadBody, { contentType, cacheControl: "3600", upsert: false });
+          .upload(storagePath, file.blob, { contentType, cacheControl: "3600", upsert: false });
         if (uploadError) throw new Error(`Falha ao enviar ${file.name}: ${uploadError.message}`);
         uploadedPaths.push(storagePath);
         attachments.push({
@@ -235,7 +241,7 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(17);
-  doc.text("IMQ | RELATORIO DE INSPECAO", 14, 12);
+  doc.text("IMIQ | RELATORIO DE INSPECAO", 14, 12);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text("Laminacao a Frio Central - Fechamento de Turno", 14, 19);
@@ -339,7 +345,7 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(90, 90, 90);
-    doc.text(`IMQ - Inspecao | developed by Abner Lucas | Gerado em ${new Date().toLocaleString("pt-BR")}`, margin, pageHeight - 7);
+    doc.text(`IMIQ - Inspecao | developed by Abner Lucas | Gerado em ${new Date().toLocaleString("pt-BR")}`, margin, pageHeight - 7);
     doc.text(`Pagina ${page} de ${pageCount}`, pageWidth - margin, pageHeight - 7, { align: "right" });
   }
 
@@ -358,7 +364,7 @@ export function downloadBlob(blob: Blob, name: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function getEvidenceContentType(file: File): string | null {
+export function getEvidenceContentType(file: Pick<File, "name" | "type">): string | null {
   const normalizedType = (file.type || "").toLowerCase();
   if (SUPPORTED_EVIDENCE_CONTENT_TYPES.has(normalizedType)) return normalizedType;
 
@@ -366,9 +372,25 @@ export function getEvidenceContentType(file: File): string | null {
   return extension ? EVIDENCE_CONTENT_TYPES[extension] || null : null;
 }
 
-async function fileToUploadBlob(file: File, contentType: string): Promise<Blob> {
-  const buffer = await file.arrayBuffer();
-  return new Blob([buffer], { type: contentType });
+export async function snapshotEvidenceFile(file: File): Promise<EvidenceFile> {
+  const contentType = getEvidenceContentType(file);
+  if (!contentType) throw new Error(`${file.name} não é uma imagem ou vídeo compatível.`);
+
+  try {
+    const buffer = await file.arrayBuffer();
+    if (file.size > 0 && buffer.byteLength === 0) {
+      throw new Error("O arquivo selecionado está vazio.");
+    }
+    return {
+      name: file.name,
+      type: contentType,
+      size: buffer.byteLength,
+      blob: new Blob([buffer], { type: contentType }),
+    };
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? ` (${error.message})` : "";
+    throw new Error(`Não foi possível ler ${file.name}${detail}. Selecione o arquivo novamente e mantenha-o disponível até a confirmação.`);
+  }
 }
 
 async function loadPdfImage(attachment: AttachmentRef): Promise<{ dataUrl: string; width: number; height: number; format: "JPEG" | "PNG" | "WEBP" } | null> {
