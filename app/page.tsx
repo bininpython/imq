@@ -22,7 +22,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { DEFECTS, DEFECT_GROUPS, EQUIPMENT_CODES, EQUIPMENT_CODE_BY_NAME } from "@/lib/inspection-codes";
 import {
   downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, getEvidenceContentType, saveReport,
-  supabase, type Deviation, type StoredReport,
+  snapshotEvidenceFile, supabase, type Deviation, type EvidenceFile, type StoredReport,
 } from "@/lib/imq-supabase";
 
 const AREAS = [
@@ -67,7 +67,7 @@ export default function Home() {
   const [deviations, setDeviations] = useState<Deviation[]>([]);
   const [dialogEquipment, setDialogEquipment] = useState<{ area: string; equipment: string } | null>(null);
   const [form, setForm] = useState({ um: "", divertedToEquipment: "", defectCode: "", observation: "" });
-  const [formFiles, setFormFiles] = useState<File[]>([]);
+  const [formFiles, setFormFiles] = useState<EvidenceFile[]>([]);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const authUserId = authUser?.id;
@@ -211,8 +211,8 @@ export default function Home() {
     }
   }
   function emailReport(report: StoredReport) {
-    const subject = encodeURIComponent(`IMQ | Fechamento ${report.shift} - ${formatDate(report.reportDate)}`);
-    const body = encodeURIComponent(`Relatório de turno IMQ\n\nData: ${formatDate(report.reportDate)}\nTurno: ${report.shift}\nResponsável do turno: ${report.reporter}\nInspetor: ${report.inspectorName || report.reporter}\nDesvios: ${report.deviationCount}\n\nO PDF pode ser gerado no botão Exportar PDF e anexado a esta mensagem.`);
+    const subject = encodeURIComponent(`IMIQ | Fechamento ${report.shift} - ${formatDate(report.reportDate)}`);
+    const body = encodeURIComponent(`Relatório de turno IMIQ\n\nData: ${formatDate(report.reportDate)}\nTurno: ${report.shift}\nResponsável do turno: ${report.reporter}\nInspetor: ${report.inspectorName || report.reporter}\nDesvios: ${report.deviationCount}\n\nO PDF pode ser gerado no botão Exportar PDF e anexado a esta mensagem.`);
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   }
 
@@ -223,7 +223,7 @@ export default function Home() {
     <div className="app-shell">
       <Toaster richColors position="top-right" />
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
-        <div className="brand"><div className="brand-mark">IMQ</div><div><strong>INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div>
+        <div className="brand"><div className="brand-mark">IMIQ</div><div><strong>INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div>
         <nav aria-label="Navegação principal">
           <NavButton icon={<LayoutDashboard />} label="Visão geral" active={view === "dashboard"} onClick={() => { setView("dashboard"); setMobileNav(false); }} />
           <NavButton icon={<ClipboardPlus />} label="Novo fechamento" active={view === "new"} onClick={beginReport} />
@@ -240,7 +240,7 @@ export default function Home() {
       <main className="main-area">
         <header className="topbar">
           <Button variant="ghost" size="icon" className="mobile-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Abrir menu"><Menu /></Button>
-          <div><p>IMQ • INSPEÇÃO</p><h1>{view === "dashboard" ? "Visão geral" : view === "new" ? "Novo fechamento de turno" : view === "reports" ? "Relatórios de turno" : "Biblioteca de códigos"}</h1></div>
+          <div><p>IMIQ • INSPEÇÃO</p><h1>{view === "dashboard" ? "Visão geral" : view === "new" ? "Novo fechamento de turno" : view === "reports" ? "Relatórios de turno" : "Biblioteca de códigos"}</h1></div>
           <div className="top-actions"><span className="today"><CalendarDays /> {new Intl.DateTimeFormat("pt-BR", { dateStyle: "long" }).format(new Date())}</span><Button variant="ghost" size="icon" aria-label="Notificações"><Bell /></Button></div>
         </header>
 
@@ -299,7 +299,7 @@ export default function Home() {
 }
 
 function AuthLoading() {
-  return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMQ</div><strong>Carregando ambiente seguro...</strong></div></main>;
+  return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMIQ</div><strong>Carregando ambiente seguro...</strong></div></main>;
 }
 
 function getShiftUser(user: { id: string; app_metadata?: { shift?: unknown; display_name?: unknown }; user_metadata?: { shift?: unknown; display_name?: unknown } } | undefined): AuthUser | null {
@@ -336,7 +336,7 @@ function AuthScreen() {
     }
   }
 
-  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><div className="brand-mark">IMQ</div><div><strong>IMQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div><div className="auth-heading"><LockKeyhole /><div><h1>Acessar sistema</h1><p>Selecione seu turno e informe o código numérico de acesso.</p></div></div><form onSubmit={submit}><fieldset className="shift-login"><legend>Turno de trabalho</legend>{(Object.keys(SHIFT_ACCOUNTS) as ShiftCode[]).map((shiftCode) => <button type="button" key={shiftCode} className={selectedShift === shiftCode ? "selected" : ""} aria-pressed={selectedShift === shiftCode} onClick={() => { setSelectedShift(shiftCode); setMessage(""); }}><strong>{shiftCode}</strong><span>{shiftCode === "TN" ? "Noite" : shiftCode === "TM" ? "Manhã" : "Tarde"}</span></button>)}</fieldset><div><Label htmlFor="access-code">Código de acesso</Label><Input id="access-code" className="access-code" type="password" inputMode="numeric" autoComplete="current-password" maxLength={6} value={accessCode} onChange={(event) => setAccessCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" /></div>{message && <p className="auth-message">{message}</p>}<Button type="submit" disabled={submitting}>{submitting ? "Verificando..." : `Entrar como ${selectedShift}`}</Button></form><p className="auth-identity">Acesso: <strong>{SHIFT_ACCOUNTS[selectedShift].label}</strong></p><p className="auth-security"><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS.</p><p className="auth-developer">developed by Abner Lucas</p></section></main>;
+  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><div className="brand-mark">IMIQ</div><div><strong>IMIQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div><div className="auth-heading"><LockKeyhole /><div><h1>Acessar sistema</h1><p>Selecione seu turno e informe o código numérico de acesso.</p></div></div><form onSubmit={submit}><fieldset className="shift-login"><legend>Turno de trabalho</legend>{(Object.keys(SHIFT_ACCOUNTS) as ShiftCode[]).map((shiftCode) => <button type="button" key={shiftCode} className={selectedShift === shiftCode ? "selected" : ""} aria-pressed={selectedShift === shiftCode} onClick={() => { setSelectedShift(shiftCode); setMessage(""); }}><strong>{shiftCode}</strong><span>{shiftCode === "TN" ? "Noite" : shiftCode === "TM" ? "Manhã" : "Tarde"}</span></button>)}</fieldset><div><Label htmlFor="access-code">Código de acesso</Label><Input id="access-code" className="access-code" type="password" inputMode="numeric" autoComplete="current-password" maxLength={6} value={accessCode} onChange={(event) => setAccessCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" /></div>{message && <p className="auth-message">{message}</p>}<Button type="submit" disabled={submitting}>{submitting ? "Verificando..." : `Entrar como ${selectedShift}`}</Button></form><p className="auth-identity">Acesso: <strong>{SHIFT_ACCOUNTS[selectedShift].label}</strong></p><p className="auth-security"><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS.</p><p className="auth-developer">developed by Abner Lucas</p></section></main>;
 }
 
 function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
@@ -413,8 +413,8 @@ function CodeLibrary() {
   return <section className="library-view"><div className="page-heading"><div><p className="eyebrow">PADRÃO DE CLASSIFICAÇÃO</p><h2>Biblioteca de códigos</h2><p>Consulta oficial de equipamentos e defeitos para o registro padronizado das ocorrências.</p></div><div className="library-count"><strong>{DEFECTS.length}</strong><span>códigos de defeito</span></div></div>
     <Card className="library-tools"><CardContent><div className="search-box"><Search /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar código, defeito ou equipamento..." /></div><Select value={group} onValueChange={setGroup}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="todos">Todos os grupos</SelectItem>{DEFECT_GROUPS.map((item) => <SelectItem value={item} key={item}>{item}</SelectItem>)}</SelectContent></Select></CardContent></Card>
     <div className="library-grid">
-      <Card className="code-card"><CardHeader><div><CardTitle>Códigos de equipamentos</CardTitle><p>Conforme referência operacional enviada</p></div><Badge variant="outline">{equipment.length}</Badge></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Código</TableHead><TableHead>Equipamento</TableHead><TableHead>Gerência no IMQ</TableHead></TableRow></TableHeader><TableBody>{equipment.map((item) => <TableRow key={`${item.code}-${item.equipment}`}><TableCell><span className={`equipment-code-badge ${item.code === "N/I" ? "code-missing" : ""}`}>{item.code}</span></TableCell><TableCell className="font-semibold">{item.equipment}</TableCell><TableCell>{findArea(item.equipment)}</TableCell></TableRow>)}</TableBody></Table>{equipment.some((item) => item.code === "N/I") && <p className="library-note"><AlertTriangle /> O código do EB3 não consta na imagem de referência e foi mantido como “N/I”.</p>}</CardContent></Card>
-      <Card className="code-card defect-library"><CardHeader><div><CardTitle>Defeitos em produtos inoxidáveis</CardTitle><p>Código oficial, descrição e organização interna</p></div><Badge variant="outline">{defects.length}</Badge></CardHeader><CardContent>{defects.length ? <Table><TableHeader><TableRow><TableHead>Código</TableHead><TableHead>Descrição do defeito</TableHead><TableHead>Grupo operacional IMQ</TableHead></TableRow></TableHeader><TableBody>{defects.map((item) => <TableRow key={item.code}><TableCell><span className="defect-code">{item.code}</span></TableCell><TableCell className="font-semibold">{item.name}</TableCell><TableCell><Badge variant="outline">{item.group}</Badge></TableCell></TableRow>)}</TableBody></Table> : <div className="analytics-empty">Nenhum código encontrado para os filtros informados.</div>}</CardContent></Card>
+      <Card className="code-card"><CardHeader><div><CardTitle>Códigos de equipamentos</CardTitle><p>Conforme referência operacional enviada</p></div><Badge variant="outline">{equipment.length}</Badge></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Código</TableHead><TableHead>Equipamento</TableHead><TableHead>Gerência no IMIQ</TableHead></TableRow></TableHeader><TableBody>{equipment.map((item) => <TableRow key={`${item.code}-${item.equipment}`}><TableCell><span className={`equipment-code-badge ${item.code === "N/I" ? "code-missing" : ""}`}>{item.code}</span></TableCell><TableCell className="font-semibold">{item.equipment}</TableCell><TableCell>{findArea(item.equipment)}</TableCell></TableRow>)}</TableBody></Table>{equipment.some((item) => item.code === "N/I") && <p className="library-note"><AlertTriangle /> O código do EB3 não consta na imagem de referência e foi mantido como “N/I”.</p>}</CardContent></Card>
+      <Card className="code-card defect-library"><CardHeader><div><CardTitle>Defeitos em produtos inoxidáveis</CardTitle><p>Código oficial, descrição e organização interna</p></div><Badge variant="outline">{defects.length}</Badge></CardHeader><CardContent>{defects.length ? <Table><TableHeader><TableRow><TableHead>Código</TableHead><TableHead>Descrição do defeito</TableHead><TableHead>Grupo operacional IMIQ</TableHead></TableRow></TableHeader><TableBody>{defects.map((item) => <TableRow key={item.code}><TableCell><span className="defect-code">{item.code}</span></TableCell><TableCell className="font-semibold">{item.name}</TableCell><TableCell><Badge variant="outline">{item.group}</Badge></TableCell></TableRow>)}</TableBody></Table> : <div className="analytics-empty">Nenhum código encontrado para os filtros informados.</div>}</CardContent></Card>
     </div>
   </section>;
 }
@@ -425,7 +425,7 @@ function findArea(equipment: string) {
 
 function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInputRef, onClose, onAdd }: {
   open: boolean; target: { area: string; equipment: string } | null; form: { um: string; divertedToEquipment: string; defectCode: string; observation: string };
-  setForm: React.Dispatch<React.SetStateAction<{ um: string; divertedToEquipment: string; defectCode: string; observation: string }>>; files: File[]; setFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  setForm: React.Dispatch<React.SetStateAction<{ um: string; divertedToEquipment: string; defectCode: string; observation: string }>>; files: EvidenceFile[]; setFiles: React.Dispatch<React.SetStateAction<EvidenceFile[]>>;
   fileInputRef: React.RefObject<HTMLInputElement | null>; onClose: () => void; onAdd: () => void;
 }) {
   const selectedDefect = DEFECTS.find((item) => item.code === form.defectCode);
@@ -433,10 +433,11 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
   const [defectQuery, setDefectQuery] = useState("");
   const [defectSearchOpen, setDefectSearchOpen] = useState(false);
   const [highlightedDefect, setHighlightedDefect] = useState(0);
+  const [readingEvidence, setReadingEvidence] = useState(false);
   const normalizedDefectQuery = normalizeSearch(defectQuery);
   const filteredDefects = DEFECTS.filter((item) => normalizeSearch(`${item.code} ${item.name} ${item.group}`).includes(normalizedDefectQuery));
 
-  function addEvidence(selected: FileList | null) {
+  async function addEvidence(selected: FileList | null) {
     const incoming = Array.from(selected || []);
     const invalidType = incoming.find((file) => !getEvidenceContentType(file));
     const oversized = incoming.find((file) => file.size > 50 * 1024 * 1024);
@@ -448,12 +449,21 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
       toast.error(`${oversized.name} excede o limite de 50 MB.`);
       return;
     }
-    setFiles((current) => {
-      const next = [...current, ...incoming].slice(0, 6);
-      if (current.length + incoming.length > 6) toast.info("Foram mantidas as 6 primeiras evidências do desvio.");
-      return next;
-    });
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    setReadingEvidence(true);
+    try {
+      const durableFiles = await Promise.all(incoming.map(snapshotEvidenceFile));
+      setFiles((current) => {
+        const next = [...current, ...durableFiles].slice(0, 6);
+        if (current.length + durableFiles.length > 6) toast.info("Foram mantidas as 6 primeiras evidências do desvio.");
+        return next;
+      });
+      if (durableFiles.length) toast.success(`${durableFiles.length} evidência${durableFiles.length > 1 ? "s prontas" : " pronta"} para envio.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível ler a evidência selecionada.");
+    } finally {
+      setReadingEvidence(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   function selectDefect(code: string) {
@@ -483,8 +493,8 @@ function DeviationDialog({ open, target, form, setForm, files, setFiles, fileInp
   return <Dialog open={open} onOpenChange={(value) => !value && onClose()}><DialogContent className="deviation-dialog"><DialogHeader><div className="dialog-kicker"><AlertTriangle /> REGISTRAR DESVIO</div><DialogTitle>{target?.area} • {target?.equipment}</DialogTitle><DialogDescription>A UM passou pelo equipamento abaixo. Informe o destino do desvio e classifique o defeito.</DialogDescription></DialogHeader>
     <div className="equipment-identification"><span>Equipamento de passagem</span><strong>{target?.equipment || "—"}</strong><span>Código de passagem</span><b>{target ? EQUIPMENT_CODE_BY_NAME[target.equipment] || "N/I" : "—"}</b></div>
     <div className="form-grid"><div className="full-field"><Label htmlFor="um">Unidade Metálica (UM) *</Label><Input id="um" className="mono" placeholder="Ex.: 671606B2000B" maxLength={20} value={form.um} onChange={(e) => setForm((f) => ({ ...f, um: e.target.value.replace(/\s/g, "").toUpperCase() }))} /><small>Use letras e números, sem espaços.</small></div><div className="full-field"><Label>Equipamento de destino do desvio *</Label><Select value={form.divertedToEquipment} onValueChange={(value) => setForm((current) => ({ ...current, divertedToEquipment: value }))}><SelectTrigger className="destination-select"><SelectValue placeholder="Selecione o equipamento de destino" /></SelectTrigger><SelectContent>{DEVIATION_DESTINATIONS.map((item) => <SelectItem value={item.equipment} key={`${item.code}-${item.equipment}`}><span className="destination-option"><b>{item.code}</b><span>{item.equipment}</span></span></SelectItem>)}</SelectContent></Select>{selectedDestination && <div className="selected-destination"><div><span>DESTINO SELECIONADO</span><strong>{selectedDestination.equipment}</strong></div><div><span>CÓDIGO AUTOMÁTICO</span><b>{selectedDestination.code}</b></div></div>}<small>Indique para qual equipamento a UM foi efetivamente desviada.</small></div><div className="full-field"><Label htmlFor="defect-search">Pesquisar código ou descrição do defeito *</Label><div className="defect-search"><Search aria-hidden="true" /><Input id="defect-search" role="combobox" aria-autocomplete="list" aria-expanded={defectSearchOpen} aria-controls="defect-results" autoComplete="off" placeholder="Ex.: 07, arranhão, oxidação..." value={defectQuery} onFocus={() => setDefectSearchOpen(true)} onChange={(event) => { setDefectQuery(event.target.value); setDefectSearchOpen(true); setHighlightedDefect(0); if (form.defectCode) setForm((current) => ({ ...current, defectCode: "" })); }} onKeyDown={handleDefectKeyDown} />{defectQuery && <button type="button" className="defect-search-clear" aria-label="Limpar pesquisa de defeito" onClick={() => { setDefectQuery(""); setDefectSearchOpen(true); setHighlightedDefect(0); setForm((current) => ({ ...current, defectCode: "" })); }}><X /></button>}</div>{defectSearchOpen && <div id="defect-results" className="defect-results" role="listbox" aria-label="Resultados da pesquisa de defeitos">{filteredDefects.length ? filteredDefects.map((item, index) => <button type="button" role="option" aria-selected={form.defectCode === item.code} className={index === highlightedDefect ? "defect-result highlighted" : "defect-result"} key={item.code} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setHighlightedDefect(index)} onClick={() => selectDefect(item.code)}><span className="defect-code">{item.code}</span><span><strong>{item.name}</strong><small>{item.group}</small></span><Check /></button>) : <div className="defect-no-results"><Search /><strong>Nenhum defeito encontrado</strong><span>Tente outro código ou termo.</span></div>}</div>}{selectedDefect && <div className="selected-defect"><span className="defect-code">{selectedDefect.code}</span><div><strong>{selectedDefect.name}</strong><small>{selectedDefect.group}</small></div><CheckCircle2 /></div>}<small>Pesquise pelo código numérico ou por qualquer palavra da descrição.</small></div><div className="full-field"><Label htmlFor="observation">Observação</Label><Textarea id="observation" placeholder="Descreva condição, localização do defeito e ação tomada..." value={form.observation} onChange={(e) => setForm((f) => ({ ...f, observation: e.target.value }))} /></div>
-      <div className="full-field"><Label>Evidências</Label><input ref={fileInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => addEvidence(event.target.files)} /><button className="upload-zone" type="button" onClick={() => fileInputRef.current?.click()}><div><Camera /><Video /></div><strong>Adicionar foto ou vídeo</strong><span>Até 6 arquivos • máximo de 50 MB cada</span></button>{files.length > 0 && <div className="selected-files">{files.map((file, index) => <div key={`${file.name}-${index}`}><Paperclip /><span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span><Button variant="ghost" size="icon" aria-label={`Remover ${file.name}`} onClick={() => setFiles((items) => items.filter((_, i) => i !== index))}><X /></Button></div>)}</div>}</div></div>
-    <DialogFooter><Button variant="outline" onClick={onClose}>Cancelar</Button><Button className="deviation-button" onClick={onAdd}><Plus /> Adicionar desvio</Button></DialogFooter>
+      <div className="full-field"><Label>Evidências</Label><input ref={fileInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => void addEvidence(event.target.files)} /><button className="upload-zone" type="button" disabled={readingEvidence} onClick={() => fileInputRef.current?.click()}><div><Camera /><Video /></div><strong>{readingEvidence ? "Preparando evidências..." : "Adicionar foto ou vídeo"}</strong><span>Até 6 arquivos • máximo de 50 MB cada</span></button>{files.length > 0 && <div className="selected-files">{files.map((file, index) => <div key={`${file.name}-${index}`}><Paperclip /><span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span><Button variant="ghost" size="icon" aria-label={`Remover ${file.name}`} onClick={() => setFiles((items) => items.filter((_, i) => i !== index))}><X /></Button></div>)}</div>}</div></div>
+    <DialogFooter><Button variant="outline" onClick={onClose} disabled={readingEvidence}>Cancelar</Button><Button className="deviation-button" onClick={onAdd} disabled={readingEvidence}><Plus /> Adicionar desvio</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
 
@@ -493,5 +503,5 @@ function ReportDialog({ report, onClose, onPdf, onCsv, onEmail, onEvidence }: { 
 }
 
 function PrintReport({ report }: { report: StoredReport }) {
-  return <article className="print-report"><header><div className="print-logo">IMQ</div><div><h1>RELATÓRIO DE INSPEÇÃO</h1><p>Laminação a Frio Central • Fechamento de Turno</p></div></header><section className="print-meta"><div><span>Data</span><strong>{formatDate(report.reportDate)}</strong></div><div><span>Turno</span><strong>{report.shift}</strong></div><div><span>Responsável</span><strong>{report.reporter}</strong></div><div><span>Inspetor</span><strong>{report.inspectorName || report.reporter}</strong></div><div><span>Status</span><strong>Finalizado</strong></div></section><h2>Resumo operacional</h2><div className="print-summary"><div><b>04</b><span>Gerências</span></div><div><b>18</b><span>Equipamentos</span></div><div><b>{report.deviationCount}</b><span>Desvios</span></div></div><h2>Ocorrências registradas</h2>{report.payload.deviations.length ? <table><thead><tr><th>Gerência</th><th>Passagem / cód.</th><th>Destino / cód.</th><th>UM</th><th>Cód. defeito</th><th>Defeito</th><th>Observação</th></tr></thead><tbody>{report.payload.deviations.map((d) => <tr key={d.id}><td>{d.area}</td><td>{d.equipment} / {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</td><td>{d.divertedToEquipment || "Não informado"} / {d.divertedToEquipmentCode || "—"}</td><td>{d.um}</td><td>{d.defectCode || "—"}</td><td>{d.defectName || d.reason}</td><td>{d.observation || "—"}</td></tr>)}</tbody></table> : <div className="print-clear">✓ Todos os equipamentos revisados, sem desvios.</div>}{report.payload.generalObservation && <section className="print-observation"><h2>Observação geral</h2><p>{report.payload.generalObservation}</p></section>}<footer><span>IMQ - Inspeção | developed by Abner Lucas</span><span>Gerado em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date())}</span></footer></article>;
+  return <article className="print-report"><header><div className="print-logo">IMIQ</div><div><h1>RELATÓRIO DE INSPEÇÃO</h1><p>Laminação a Frio Central • Fechamento de Turno</p></div></header><section className="print-meta"><div><span>Data</span><strong>{formatDate(report.reportDate)}</strong></div><div><span>Turno</span><strong>{report.shift}</strong></div><div><span>Responsável</span><strong>{report.reporter}</strong></div><div><span>Inspetor</span><strong>{report.inspectorName || report.reporter}</strong></div><div><span>Status</span><strong>Finalizado</strong></div></section><h2>Resumo operacional</h2><div className="print-summary"><div><b>04</b><span>Gerências</span></div><div><b>18</b><span>Equipamentos</span></div><div><b>{report.deviationCount}</b><span>Desvios</span></div></div><h2>Ocorrências registradas</h2>{report.payload.deviations.length ? <table><thead><tr><th>Gerência</th><th>Passagem / cód.</th><th>Destino / cód.</th><th>UM</th><th>Cód. defeito</th><th>Defeito</th><th>Observação</th></tr></thead><tbody>{report.payload.deviations.map((d) => <tr key={d.id}><td>{d.area}</td><td>{d.equipment} / {d.equipmentCode || EQUIPMENT_CODE_BY_NAME[d.equipment] || "N/I"}</td><td>{d.divertedToEquipment || "Não informado"} / {d.divertedToEquipmentCode || "—"}</td><td>{d.um}</td><td>{d.defectCode || "—"}</td><td>{d.defectName || d.reason}</td><td>{d.observation || "—"}</td></tr>)}</tbody></table> : <div className="print-clear">✓ Todos os equipamentos revisados, sem desvios.</div>}{report.payload.generalObservation && <section className="print-observation"><h2>Observação geral</h2><p>{report.payload.generalObservation}</p></section>}<footer><span>IMIQ - Inspeção | developed by Abner Lucas</span><span>Gerado em {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date())}</span></footer></article>;
 }

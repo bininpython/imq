@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "IMQ - Inspeção",
+  title: "IMIQ - Inspeção",
   description: "Fechamento profissional de relatórios de turno da Laminação a Frio Central.",
   icons: {
     icon: "/favicon.svg",

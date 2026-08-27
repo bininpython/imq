@@ -23,7 +23,7 @@ begin
   v_shift := auth.jwt()->'user_metadata'->>'shift';
   v_reporter := auth.jwt()->'user_metadata'->>'display_name';
   if v_shift not in ('TN', 'TM', 'TT') or nullif(btrim(v_reporter), '') is null then
-    raise exception 'Conta de turno IMQ inválida.';
+    raise exception 'Conta de turno IMIQ inválida.';
   end if;
 
   insert into public.imq_reports (
