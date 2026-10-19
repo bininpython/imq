@@ -38,14 +38,6 @@ create table public.imq_attachments (
   created_at timestamptz not null default now()
 );
 
-create table public.imq_shift_accounts (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  shift text not null unique check (shift in ('TN', 'TM', 'TT')),
-  display_name text not null check (char_length(btrim(display_name)) between 2 and 120),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
 create index imq_reports_date_created_idx
   on public.imq_reports (report_date desc, created_at desc);
 create index imq_reports_owner_date_idx
@@ -66,13 +58,11 @@ create index imq_attachments_deviation_id_idx
 alter table public.imq_reports enable row level security;
 alter table public.imq_deviations enable row level security;
 alter table public.imq_attachments enable row level security;
-alter table public.imq_shift_accounts enable row level security;
 
 grant usage on schema public to authenticated;
 grant select, insert on public.imq_reports to authenticated;
 grant select, insert on public.imq_deviations to authenticated;
 grant select, insert on public.imq_attachments to authenticated;
-grant select on public.imq_shift_accounts to authenticated;
 
 create policy "imq reports readable"
   on public.imq_reports for select to authenticated
@@ -104,52 +94,12 @@ create policy "imq attachments insertable"
     select 1 from public.imq_reports report
     where report.id = report_id and report.owner_id = (select auth.uid())
   ));
-create policy "imq shift accounts readable"
-  on public.imq_shift_accounts for select to authenticated
-  using ((select auth.uid()) = user_id);
-
-insert into public.imq_shift_accounts (user_id, shift, display_name)
-select id,
-  case email
-    when 'tn@imq.app' then 'TN'
-    when 'tm@imq.app' then 'TM'
-    when 'tt@imq.app' then 'TT'
-  end as shift,
-  case email
-    when 'tn@imq.app' then 'Inspetor Líder TN'
-    when 'tm@imq.app' then 'Inspetor Líder TM'
-    when 'tt@imq.app' then 'Inspetor Líder TT'
-  end as display_name
-from auth.users
-where email in ('tn@imq.app', 'tm@imq.app', 'tt@imq.app')
-on conflict (user_id) do update set
-  shift = excluded.shift,
-  display_name = excluded.display_name,
-  updated_at = now();
-
-update auth.users
-set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object(
-  'shift',
-  case email
-    when 'tn@imq.app' then 'TN'
-    when 'tm@imq.app' then 'TM'
-    when 'tt@imq.app' then 'TT'
-  end,
-  'display_name',
-  case email
-    when 'tn@imq.app' then 'Inspetor Líder TN'
-    when 'tm@imq.app' then 'Inspetor Líder TM'
-    when 'tt@imq.app' then 'Inspetor Líder TT'
-  end
-)
-where email in ('tn@imq.app', 'tm@imq.app', 'tt@imq.app');
-
 create or replace function public.create_imq_report(p_report jsonb)
 returns public.imq_reports
 language plpgsql
 security invoker
 set search_path = ''
-as $$
+as $
 declare
   v_report public.imq_reports;
   v_deviation jsonb;
@@ -167,14 +117,20 @@ begin
     raise exception 'A lista de desvios deve ser um array.';
   end if;
 
-  select account.shift, account.display_name
-    into v_shift, v_reporter
-  from public.imq_shift_accounts account
-  where account.user_id = (select auth.uid());
-
-  if v_shift not in ('TN', 'TM', 'TT') or nullif(btrim(v_reporter), '') is null then
-    raise exception 'Conta de turno IMIQ inválida.';
+  if (select auth.uid()) is null then
+    raise exception 'Sessão de inspeção não autenticada.';
   end if;
+
+  v_shift := p_report->>'shift';
+  if v_shift is null or v_shift not in ('TN', 'TM', 'TT') then
+    raise exception 'Turno de inspeção inválido.';
+  end if;
+
+  v_reporter := case v_shift
+    when 'TN' then 'Equipe TN'
+    when 'TM' then 'Equipe TM'
+    when 'TT' then 'Equipe TT'
+  end;
 
   v_inspector_name := coalesce(nullif(btrim(p_report->>'inspector_name'), ''), v_reporter);
   if char_length(v_inspector_name) not between 2 and 120 then
@@ -241,7 +197,7 @@ begin
 
   return v_report;
 end;
-$$;
+$;
 
 revoke all on function public.create_imq_report(jsonb) from public;
 grant execute on function public.create_imq_report(jsonb) to authenticated;

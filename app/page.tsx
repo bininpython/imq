@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BarChart3, Bell, BookOpen, CalendarDays, Camera, Check, CheckCircle2,
   ChevronRight, ClipboardPlus, Download, Eye, Factory, FileSpreadsheet, FileText,
-  LayoutDashboard, LockKeyhole, LogOut, Mail, Menu, Paperclip, Plus, Printer,
+  LayoutDashboard, UsersRound, RefreshCcw, Mail, Menu, Paperclip, Plus, Printer,
   Search, ShieldCheck, Video, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -36,12 +36,12 @@ const ALL_EQUIPMENT = AREAS.flatMap((area) => area.equipment.map((equipment) => 
 const DEVIATION_DESTINATIONS = [...EQUIPMENT_CODES, { code: "N/I", equipment: "EB3" }]
   .sort((a, b) => a.equipment.localeCompare(b.equipment));
 
-const SHIFT_ACCOUNTS = {
-  TN: { email: "tn@imq.app", label: "Inspetor Líder TN" },
-  TM: { email: "tm@imq.app", label: "Inspetor Líder TM" },
-  TT: { email: "tt@imq.app", label: "Inspetor Líder TT" },
+const SHIFT_OPTIONS = {
+  TN: { label: "Equipe TN" },
+  TM: { label: "Equipe TM" },
+  TT: { label: "Equipe TT" },
 } as const;
-type ShiftCode = keyof typeof SHIFT_ACCOUNTS;
+type ShiftCode = keyof typeof SHIFT_OPTIONS;
 type AuthUser = { id: string; shift: ShiftCode; label: string };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -53,6 +53,7 @@ const normalizeSearch = (value: string) => value.normalize("NFD").replace(/[\u03
 export default function Home() {
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [choosingShift, setChoosingShift] = useState(false);
   const [view, setView] = useState<"dashboard" | "new" | "reports" | "library">("dashboard");
   const [mobileNav, setMobileNav] = useState(false);
   const [reports, setReports] = useState<StoredReport[]>([]);
@@ -88,6 +89,22 @@ export default function Home() {
       data.subscription.unsubscribe();
     };
   }, []);
+
+  async function enterShift(shift: ShiftCode) {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    // Preserve an existing session so changing shifts does not orphan its reports.
+    const result = sessionData.session?.user
+      ? await supabase.auth.updateUser({ data: { shift } })
+      : await supabase.auth.signInAnonymously({ options: { data: { shift } } });
+    if (result.error) throw result.error;
+    const user = getShiftUser(result.data.user ?? undefined);
+    if (!user) throw new Error("Não foi possível identificar o turno selecionado.");
+    setAuthUser(user);
+    setChoosingShift(false);
+    setView("dashboard");
+  }
 
   async function loadReports() {
     setLoadingReports(true);
@@ -217,7 +234,9 @@ export default function Home() {
   }
 
   if (!authReady) return <AuthLoading />;
-  if (!authUser) return <AuthScreen />;
+  if (!authUser || choosingShift) {
+    return <ShiftEntry onEnter={enterShift} onCancel={authUser ? () => setChoosingShift(false) : undefined} />;
+  }
 
   return (
     <div className="app-shell">
@@ -231,8 +250,8 @@ export default function Home() {
           <NavButton icon={<BookOpen />} label="Biblioteca de códigos" active={view === "library"} onClick={() => { setView("library"); setMobileNav(false); }} />
         </nav>
         <div className="sidebar-foot">
-          <div className="security-note"><ShieldCheck /><div><strong>Ambiente protegido</strong><span>Dados operacionais seguros</span></div></div>
-          <div className="profile"><div className="avatar">{authUser.shift}</div><div><strong>{authUser.label}</strong><span>Turno {authUser.shift}</span></div><Button variant="ghost" size="icon" title="Sair" aria-label="Sair do sistema" onClick={() => void supabase.auth.signOut()}><LogOut /></Button></div>
+          <div className="security-note"><ShieldCheck /><div><strong>Sessão individual</strong><span>Histórico vinculado a este dispositivo</span></div></div>
+          <div className="profile"><div className="avatar">{authUser.shift}</div><div><strong>{authUser.label}</strong><span>Turno {authUser.shift}</span></div><Button variant="ghost" size="icon" title="Trocar turno" aria-label="Trocar turno" onClick={() => setChoosingShift(true)}><RefreshCcw /></Button></div>
           <div className="developer-credit">developed by Abner Lucas</div>
         </div>
       </aside>
@@ -299,44 +318,58 @@ export default function Home() {
 }
 
 function AuthLoading() {
-  return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMIQ</div><strong>Carregando ambiente seguro...</strong></div></main>;
+  return <main className="auth-shell"><div className="auth-loading"><div className="brand-mark">IMIQ</div><strong>Preparando a sessão...</strong></div></main>;
 }
 
-function getShiftUser(user: { id: string; app_metadata?: { shift?: unknown; display_name?: unknown }; user_metadata?: { shift?: unknown; display_name?: unknown } } | undefined): AuthUser | null {
-  const shift = user?.app_metadata?.shift || user?.user_metadata?.shift;
+function getShiftUser(user: { id: string; app_metadata?: { shift?: unknown }; user_metadata?: { shift?: unknown } } | undefined): AuthUser | null {
+  const shift = user?.user_metadata?.shift ?? user?.app_metadata?.shift;
   if (shift !== "TN" && shift !== "TM" && shift !== "TT") return null;
-  return { id: user.id, shift, label: SHIFT_ACCOUNTS[shift].label };
+  return { id: user!.id, shift, label: SHIFT_OPTIONS[shift].label };
 }
 
-function AuthScreen() {
+function ShiftEntry({ onEnter, onCancel }: { onEnter: (shift: ShiftCode) => Promise<void>; onCancel?: () => void }) {
   const [selectedShift, setSelectedShift] = useState<ShiftCode>("TN");
-  const [accessCode, setAccessCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!/^\d{6}$/.test(accessCode)) {
-      setMessage("Informe o código de acesso com 6 números.");
-      return;
-    }
-
     setSubmitting(true);
     setMessage("");
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: SHIFT_ACCOUNTS[selectedShift].email,
-        password: accessCode,
-      });
-      if (error) throw error;
-    } catch (error) {
-      setMessage(error instanceof Error && error.message !== "Invalid login credentials" ? error.message : "Turno ou código de acesso incorreto.");
+      await onEnter(selectedShift);
+    } catch {
+      setMessage("Não foi possível iniciar a sessão. Tente novamente ou contate o suporte.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  return <main className="auth-shell"><section className="auth-card"><div className="auth-brand"><div className="brand-mark">IMIQ</div><div><strong>IMIQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div><div className="auth-heading"><LockKeyhole /><div><h1>Acessar sistema</h1><p>Selecione seu turno e informe o código numérico de acesso.</p></div></div><form onSubmit={submit}><fieldset className="shift-login"><legend>Turno de trabalho</legend>{(Object.keys(SHIFT_ACCOUNTS) as ShiftCode[]).map((shiftCode) => <button type="button" key={shiftCode} className={selectedShift === shiftCode ? "selected" : ""} aria-pressed={selectedShift === shiftCode} onClick={() => { setSelectedShift(shiftCode); setMessage(""); }}><strong>{shiftCode}</strong><span>{shiftCode === "TN" ? "Noite" : shiftCode === "TM" ? "Manhã" : "Tarde"}</span></button>)}</fieldset><div><Label htmlFor="access-code">Código de acesso</Label><Input id="access-code" className="access-code" type="password" inputMode="numeric" autoComplete="current-password" maxLength={6} value={accessCode} onChange={(event) => setAccessCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" /></div>{message && <p className="auth-message">{message}</p>}<Button type="submit" disabled={submitting}>{submitting ? "Verificando..." : `Entrar como ${selectedShift}`}</Button></form><p className="auth-identity">Acesso: <strong>{SHIFT_ACCOUNTS[selectedShift].label}</strong></p><p className="auth-security"><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS.</p><p className="auth-developer">developed by Abner Lucas</p></section></main>;
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-brand"><div className="brand-mark">IMIQ</div><div><strong>IMIQ INSPEÇÃO</strong><span>Laminação a Frio Central</span></div></div>
+        <div className="auth-heading"><UsersRound /><div><h1>Selecionar turno</h1><p>Escolha seu turno para entrar, sem PIN ou senha.</p></div></div>
+        <form onSubmit={submit}>
+          <fieldset className="shift-login">
+            <legend>Turno de trabalho</legend>
+            {(Object.keys(SHIFT_OPTIONS) as ShiftCode[]).map((shiftCode) => (
+              <button type="button" key={shiftCode} className={selectedShift === shiftCode ? "selected" : ""} aria-pressed={selectedShift === shiftCode} disabled={submitting} onClick={() => { setSelectedShift(shiftCode); setMessage(""); }}>
+                <strong>{shiftCode}</strong><span>{shiftCode === "TN" ? "Noite" : shiftCode === "TM" ? "Manhã" : "Tarde"}</span>
+              </button>
+            ))}
+          </fieldset>
+          {message && <p className="auth-message" role="alert">{message}</p>}
+          <Button type="submit" disabled={submitting}>{submitting ? "Acessando..." : `Entrar no turno ${selectedShift}`}</Button>
+          {onCancel && <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>Voltar</Button>}
+        </form>
+        <p className="auth-identity">Identificação do fechamento: <strong>{SHIFT_OPTIONS[selectedShift].label}</strong></p>
+        <p className="auth-security"><ShieldCheck /> Os registros ficam vinculados à sessão atual.</p>
+        <p className="auth-session-note">Sem verificação de identidade. Não limpe os dados deste navegador: sessões anônimas não podem ser recuperadas após a saída.</p>
+        <p className="auth-developer">developed by Abner Lucas</p>
+      </section>
+    </main>
+  );
 }
 
 function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {

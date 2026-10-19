@@ -1,3 +1,7 @@
+-- Execute no Supabase SQL Editor ANTES de publicar a interface sem PIN.
+-- Habilite Anonymous Sign-Ins em Authentication > Providers primeiro.
+-- Relatórios e evidências antigos mantêm seus owner_id originais.
+
 create or replace function public.create_imq_report(p_report jsonb)
 returns public.imq_reports
 language plpgsql
@@ -11,6 +15,7 @@ declare
   v_deviation_id uuid;
   v_shift text;
   v_reporter text;
+  v_inspector_name text;
 begin
   if p_report is null or jsonb_typeof(p_report) <> 'object' then
     raise exception 'Relatório inválido.';
@@ -20,14 +25,28 @@ begin
     raise exception 'A lista de desvios deve ser um array.';
   end if;
 
-  v_shift := auth.jwt()->'user_metadata'->>'shift';
-  v_reporter := auth.jwt()->'user_metadata'->>'display_name';
-  if v_shift not in ('TN', 'TM', 'TT') or nullif(btrim(v_reporter), '') is null then
-    raise exception 'Conta de turno IMIQ inválida.';
+  if (select auth.uid()) is null then
+    raise exception 'Sessão de inspeção não autenticada.';
+  end if;
+
+  v_shift := p_report->>'shift';
+  if v_shift is null or v_shift not in ('TN', 'TM', 'TT') then
+    raise exception 'Turno de inspeção inválido.';
+  end if;
+
+  v_reporter := case v_shift
+    when 'TN' then 'Equipe TN'
+    when 'TM' then 'Equipe TM'
+    when 'TT' then 'Equipe TT'
+  end;
+
+  v_inspector_name := coalesce(nullif(btrim(p_report->>'inspector_name'), ''), v_reporter);
+  if char_length(v_inspector_name) not between 2 and 120 then
+    raise exception 'Nome do inspetor inválido.';
   end if;
 
   insert into public.imq_reports (
-    id, owner_id, report_date, shift, reporter, status, reviewed,
+    id, owner_id, report_date, shift, reporter, inspector_name, status, reviewed,
     general_observation, deviation_count
   ) values (
     coalesce(nullif(p_report->>'id', '')::uuid, gen_random_uuid()),
@@ -35,6 +54,7 @@ begin
     (p_report->>'report_date')::date,
     v_shift,
     v_reporter,
+    v_inspector_name,
     coalesce(nullif(p_report->>'status', ''), 'finalizado'),
     coalesce(p_report->'reviewed', '[]'::jsonb),
     coalesce(p_report->>'general_observation', ''),
@@ -89,3 +109,7 @@ $$;
 
 revoke all on function public.create_imq_report(jsonb) from public;
 grant execute on function public.create_imq_report(jsonb) to authenticated;
+
+-- A tabela das antigas contas compartilhadas não é mais utilizada.
+-- NÃO exclua usuários de auth.users: owner_id usa ON DELETE CASCADE.
+drop table if exists public.imq_shift_accounts;
