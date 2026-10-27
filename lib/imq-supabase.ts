@@ -221,9 +221,9 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
     import("jspdf-autotable"),
   ]);
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-  const purple: [number, number, number] = [100, 32, 111];
-  const orange: [number, number, number] = [243, 111, 33];
-  const black: [number, number, number] = [20, 20, 20];
+  const purple: [number, number, number] = [109, 40, 217];
+  const orange: [number, number, number] = [255, 90, 31];
+  const black: [number, number, number] = [10, 10, 10];
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
@@ -234,10 +234,12 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
     return 18;
   }
 
-  doc.setFillColor(...purple);
+  doc.setFillColor(...black);
   doc.rect(0, 0, pageWidth, 27, "F");
+  doc.setFillColor(...purple);
+  doc.rect(0, 27, pageWidth * 0.82, 2, "F");
   doc.setFillColor(...orange);
-  doc.rect(0, 27, pageWidth, 2, "F");
+  doc.rect(pageWidth * 0.82, 27, pageWidth * 0.18, 2, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(17);
@@ -274,8 +276,8 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
     body,
     theme: "grid",
     styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.2, valign: "middle", lineColor: [180, 180, 180], lineWidth: 0.15 },
-    headStyles: { fillColor: purple, textColor: 255, fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [246, 242, 247] },
+    headStyles: { fillColor: black, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [247, 247, 247] },
     columnStyles: {
       0: { cellWidth: 16 }, 1: { cellWidth: 30 }, 2: { cellWidth: 32 },
       3: { cellWidth: 28 }, 4: { cellWidth: 20 }, 5: { cellWidth: 42 },
