@@ -219,15 +219,20 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 6px; border-radi
 .shift-picker button[data-selected="true"] { border-color: var(--text); background: var(--text); color: var(--surface); }
 .shift-picker button[data-selected="true"] span { color: color-mix(in oklab, var(--surface) 65%, transparent); }
 .shift-picker button[data-selected="true"]::after { content: ""; position: absolute; top: 12px; right: 12px; width: 7px; height: 7px; border-radius: 99px; background: var(--signal); }
-.code-input { width: 100%; }
-.code-group { display: grid !important; grid-template-columns: repeat(6, 1fr); gap: 8px; width: 100%; }
-.code-slot { position: relative; height: 56px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface); transition: border-color .15s, box-shadow .15s; }
-.code-slot i { width: 10px; height: 10px; border-radius: 99px; background: var(--text); animation: pop .2s var(--ease); }
-.code-slot[data-filled] { border-color: var(--text-3); }
-.code-slot[data-active] { border-color: var(--violet); box-shadow: 0 0 0 3px color-mix(in oklab, var(--violet) 20%, transparent); }
-.code-caret { width: 1.5px; height: 22px; background: var(--violet); animation: blink 1s steps(2) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-@keyframes pop { from { transform: scale(.2); } to { transform: scale(1); } }
+.shift-entry { grid-template-columns: 1fr; gap: 10px; }
+.shift-entry button { grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 18px 20px; }
+.shift-entry button strong { font-size: 30px; }
+.shift-entry button span { font-size: 14px; color: var(--text-2); }
+.shift-entry button em { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); font-style: normal; transition: background-color .2s, color .2s, transform .2s var(--ease); }
+.shift-entry button em svg { width: 17px; height: 17px; }
+.shift-entry button:hover:not(:disabled) { border-color: var(--text); transform: translateY(-1px); box-shadow: var(--shadow); }
+.shift-entry button:hover:not(:disabled) em { background: var(--violet); color: #fff; transform: translateX(2px); }
+.shift-entry button:disabled { cursor: progress; opacity: .55; }
+.shift-entry button[aria-busy="true"] { opacity: 1; border-color: var(--violet); }
+.shift-entry button[aria-busy="true"] em { background: var(--violet); color: #fff; }
+.shift-entry button[data-current]::after { content: "atual"; position: static; width: auto; height: auto; background: none; grid-column: 2; margin-top: -10px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--signal-ink); }
+.spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .auth-message { display: flex; align-items: center; gap: 8px; margin: -6px 0 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--signal-soft); border: 1px solid var(--signal-line); color: var(--signal-ink); font-size: 13px; font-weight: 500; }
 .auth-message svg { width: 16px; flex: none; }
 .auth-submit { height: 48px !important; font-size: 15px; justify-content: space-between !important; padding: 0 18px !important; }

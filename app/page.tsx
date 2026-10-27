@@ -1,19 +1,17 @@
 "use client";
 
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
-import { OTPInputContext, REGEXP_ONLY_DIGITS } from "input-otp";
 import {
   AlertTriangle, ArrowLeft, ArrowUpRight, BookOpen, Camera, Check, CheckCircle2, ChevronRight,
   ClipboardPlus, Command as CommandIcon, Download, Eye, FileSpreadsheet, FileText, LayoutDashboard,
-  LogOut, Mail, Menu, Moon, Paperclip, Plus, Printer, Search, ShieldCheck, Sun, Video, X,
+  Loader2, Mail, Menu, Moon, Paperclip, Plus, Printer, RefreshCcw, Search, ShieldCheck, Sun, Video, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { InputOTP, InputOTPGroup } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -37,11 +35,12 @@ const DEVIATION_DESTINATIONS = [...EQUIPMENT_CODES, { code: "N/I", equipment: "E
   .sort((a, b) => a.equipment.localeCompare(b.equipment));
 
 const SHIFT_ACCOUNTS = {
-  TN: { email: "tn@imq.app", label: "Inspetor Líder TN", period: "Noite" },
-  TM: { email: "tm@imq.app", label: "Inspetor Líder TM", period: "Manhã" },
-  TT: { email: "tt@imq.app", label: "Inspetor Líder TT", period: "Tarde" },
+  TN: { label: "Inspetor Líder TN", period: "Noite" },
+  TM: { label: "Inspetor Líder TM", period: "Manhã" },
+  TT: { label: "Inspetor Líder TT", period: "Tarde" },
 } as const;
 type ShiftCode = keyof typeof SHIFT_ACCOUNTS;
+const SHIFT_CODES = Object.keys(SHIFT_ACCOUNTS) as ShiftCode[];
 type AuthUser = { id: string; shift: ShiftCode; label: string };
 
 type View = "dashboard" | "new" | "reports" | "library";
@@ -102,6 +101,7 @@ export default function Home() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [mobileNav, setMobileNav] = useState(false);
+  const [choosingShift, setChoosingShift] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState("");
   const [reports, setReports] = useState<StoredReport[]>([]);
@@ -120,7 +120,8 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [theme, toggleTheme] = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const authUserId = authUser?.id;
+  // Recarrega o histórico quando a sessão ou o turno mudam.
+  const authKey = authUser ? `${authUser.id}:${authUser.shift}` : null;
 
   useEffect(() => {
     let mounted = true;
@@ -152,10 +153,30 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (!authUserId) return;
+    if (!authKey) return;
     const task = window.setTimeout(() => { void loadReports(); }, 0);
     return () => window.clearTimeout(task);
-  }, [authUserId]);
+  }, [authKey]);
+
+  /** Entrada sem PIN: sessão anônima do Supabase marcada com o turno escolhido. */
+  async function enterShift(shift: ShiftCode) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.user) {
+      // Reaproveita a sessão do dispositivo e só troca o turno.
+      const { error } = await supabase.auth.updateUser({ data: { shift } });
+      if (error) throw error;
+      const { data, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) throw refreshError;
+      setAuthUser(getShiftUser(data.user ?? undefined));
+    } else {
+      const { data, error } = await supabase.auth.signInAnonymously({ options: { data: { shift } } });
+      if (error) throw error;
+      setAuthUser(getShiftUser(data.user ?? undefined));
+    }
+    resetDraft();
+    setChoosingShift(false);
+    setView("dashboard");
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -285,7 +306,7 @@ export default function Home() {
   }
 
   if (!authReady) return <AuthLoading />;
-  if (!authUser) return <><Toaster theme={theme} position="top-right" /><AuthScreen theme={theme} onToggleTheme={toggleTheme} /></>;
+  if (!authUser || choosingShift) return <><Toaster theme={theme} position="top-right" /><AuthScreen theme={theme} onToggleTheme={toggleTheme} current={authUser?.shift} onEnter={enterShift} onCancel={authUser ? () => setChoosingShift(false) : undefined} /></>;
 
   const shiftPeriod = SHIFT_ACCOUNTS[authUser.shift].period;
 
@@ -305,11 +326,11 @@ export default function Home() {
           <CommandIcon /><span>Comandos</span><kbd>Ctrl K</kbd>
         </button>
         <div className="rail-foot">
-          <div className="rail-secure"><ShieldCheck /><span>Ambiente protegido · RLS</span></div>
+          <div className="rail-secure"><ShieldCheck /><span>Acesso por turno · dados com RLS</span></div>
           <div className="rail-profile">
             <div className="rail-avatar">{authUser.shift}</div>
             <div><strong>{authUser.label}</strong><span>Turno da {shiftPeriod}</span></div>
-            <Button variant="ghost" size="icon" title="Sair" aria-label="Sair do sistema" onClick={() => void supabase.auth.signOut()}><LogOut /></Button>
+            <Button variant="ghost" size="icon" title="Trocar turno" aria-label="Trocar turno" onClick={() => setChoosingShift(true)}><RefreshCcw /></Button>
           </div>
           <p className="rail-credit">developed by Abner Lucas</p>
         </div>
@@ -416,7 +437,7 @@ export default function Home() {
           <CommandGroup heading="Ações">
             <CommandItem value="alternar tema claro escuro" onSelect={() => runCommand(toggleTheme)}>{theme === "dark" ? <Sun /> : <Moon />}<span>Alternar para tema {theme === "dark" ? "claro" : "escuro"}</span></CommandItem>
             <CommandItem value="atualizar relatórios recarregar" onSelect={() => runCommand(() => void loadReports())}><FileText /><span>Atualizar relatórios</span></CommandItem>
-            <CommandItem value="sair encerrar sessão" onSelect={() => runCommand(() => void supabase.auth.signOut())}><LogOut /><span>Sair do sistema</span></CommandItem>
+            <CommandItem value="trocar turno tn tm tt" onSelect={() => runCommand(() => setChoosingShift(true))}><RefreshCcw /><span>Trocar turno</span></CommandItem>
           </CommandGroup>
           <CommandSeparator />
           <CommandGroup heading="Códigos de defeito">
@@ -450,45 +471,27 @@ function AuthLoading() {
 
 function getShiftUser(user: { id: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> } | undefined): AuthUser | null {
   if (!user) return null;
-  const shift = user.app_metadata?.shift || user.user_metadata?.shift;
+  const shift = user.user_metadata?.shift ?? user.app_metadata?.shift;
   if (shift !== "TN" && shift !== "TM" && shift !== "TT") return null;
   return { id: user.id, shift, label: SHIFT_ACCOUNTS[shift].label };
 }
 
-function CodeSlot({ index }: { index: number }) {
-  const context = useContext(OTPInputContext);
-  const slot = context?.slots[index];
-  return <div className="code-slot" data-active={slot?.isActive || undefined} data-filled={slot?.char ? true : undefined}>
-    {slot?.char ? <i aria-hidden="true" /> : null}
-    {slot?.hasFakeCaret && <span className="code-caret" />}
-  </div>;
-}
-
-function AuthScreen({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
-  const [selectedShift, setSelectedShift] = useState<ShiftCode>("TN");
-  const [accessCode, setAccessCode] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+function AuthScreen({ theme, onToggleTheme, current, onEnter, onCancel }: { theme: Theme; onToggleTheme: () => void; current?: ShiftCode; onEnter: (shift: ShiftCode) => Promise<void>; onCancel?: () => void }) {
+  const [entering, setEntering] = useState<ShiftCode | null>(null);
   const [message, setMessage] = useState("");
 
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!/^\d{6}$/.test(accessCode)) {
-      setMessage("Informe o código de acesso com 6 números.");
-      return;
-    }
-
-    setSubmitting(true);
+  async function enter(shift: ShiftCode) {
+    setEntering(shift);
     setMessage("");
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: SHIFT_ACCOUNTS[selectedShift].email,
-        password: accessCode,
-      });
-      if (error) throw error;
+      await onEnter(shift);
     } catch (error) {
-      setMessage(error instanceof Error && error.message !== "Invalid login credentials" ? error.message : "Turno ou código de acesso incorreto.");
+      const text = error instanceof Error ? error.message : "";
+      setMessage(/anonymous/i.test(text)
+        ? "O acesso sem senha ainda não foi liberado no Supabase. Ative “Anonymous Sign-Ins” no painel do projeto."
+        : "Não foi possível entrar no turno. Verifique a conexão e tente novamente.");
     } finally {
-      setSubmitting(false);
+      setEntering(null);
     }
   }
 
@@ -511,28 +514,20 @@ function AuthScreen({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () 
         <div className="auth-mobile-brand"><Logo size={28} /><strong>IMIQ</strong></div>
         <Button variant="ghost" size="icon" onClick={onToggleTheme} aria-label={theme === "dark" ? "Usar tema claro" : "Usar tema escuro"}>{theme === "dark" ? <Sun /> : <Moon />}</Button>
       </div>
-      <form className="auth-form" onSubmit={submit}>
-        <p className="kicker"><i />Acesso restrito</p>
-        <h1>Entrar no turno</h1>
-        <p className="lede">Selecione seu turno e informe o código numérico de acesso.</p>
+      <div className="auth-form">
+        <p className="kicker"><i />{current ? "Trocar turno" : "Acesso por turno"}</p>
+        <h1>{current ? "Para qual turno?" : "Selecione seu turno"}</h1>
+        <p className="lede">Toque no seu turno para entrar. Não é preciso senha.</p>
 
-        <fieldset className="shift-picker">
-          <legend>Turno de trabalho</legend>
-          {(Object.keys(SHIFT_ACCOUNTS) as ShiftCode[]).map((shiftCode) => <button type="button" key={shiftCode} data-selected={selectedShift === shiftCode} aria-pressed={selectedShift === shiftCode} onClick={() => { setSelectedShift(shiftCode); setMessage(""); }}>
-            <strong>{shiftCode}</strong><span>{SHIFT_ACCOUNTS[shiftCode].period}</span>
+        <div className="shift-picker shift-entry" role="group" aria-label="Turno de trabalho">
+          {SHIFT_CODES.map((shiftCode) => <button type="button" key={shiftCode} data-current={current === shiftCode || undefined} aria-busy={entering === shiftCode} disabled={entering !== null} onClick={() => void enter(shiftCode)}>
+            <strong>{shiftCode}</strong><span>Turno da {SHIFT_ACCOUNTS[shiftCode].period}</span>
+            <em>{entering === shiftCode ? <Loader2 className="spin" /> : <ArrowUpRight />}</em>
           </button>)}
-        </fieldset>
-
-        <div className="field">
-          <Label htmlFor="access-code">Código de acesso</Label>
-          <InputOTP id="access-code" maxLength={6} pattern={REGEXP_ONLY_DIGITS} inputMode="numeric" autoComplete="current-password" value={accessCode} onChange={(value) => { setAccessCode(value); setMessage(""); }} containerClassName="code-input">
-            <InputOTPGroup className="code-group">{[0, 1, 2, 3, 4, 5].map((index) => <CodeSlot key={index} index={index} />)}</InputOTPGroup>
-          </InputOTP>
         </div>
         {message && <p className="auth-message" role="alert"><AlertTriangle /> {message}</p>}
-        <Button type="submit" size="lg" className="btn-primary auth-submit" disabled={submitting}>{submitting ? "Verificando…" : `Entrar como ${selectedShift}`}<ArrowUpRight /></Button>
-        <p className="auth-identity">Conta selecionada · <strong>{SHIFT_ACCOUNTS[selectedShift].label}</strong></p>
-      </form>
+        {onCancel && <Button type="button" variant="outline" onClick={onCancel} disabled={entering !== null}><ArrowLeft /> Voltar</Button>}
+      </div>
       <footer className="auth-foot"><span><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS</span><span>developed by Abner Lucas</span></footer>
     </section>
   </main>;

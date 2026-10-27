@@ -4,7 +4,7 @@ Sistema de fechamento de inspeções por turno da Laminação a Frio Central.
 
 ## Funcionalidades
 
-- acesso por turno TN, TM e TT com código de seis dígitos;
+- entrada por turno TN, TM ou TT com um toque, sem PIN ou senha (sessão anônima do Supabase);
 - checklist dos equipamentos e registro de desvios;
 - pesquisa de equipamentos e códigos de defeito;
 - nome do inspetor responsável em cada fechamento;
@@ -31,6 +31,16 @@ npm test
 ```
 
 O comando de testes executa o build de produção e as verificações automatizadas.
+
+---
+
+## Acesso sem PIN — configuração do Supabase
+
+1. Em **Authentication > Sign In / Providers**, ative **Allow anonymous sign-ins**.
+2. No **SQL Editor**, execute `supabase/remove_pin_shift_access.sql`. O script não apaga dados.
+3. Publique a aplicação.
+
+Ao tocar no turno, o app cria uma sessão anônima marcada com o turno. Quem entra como TN vê todo o histórico do TN, inclusive os relatórios antigos. Sem PIN, qualquer pessoa com o endereço do app pode entrar em qualquer turno; restrinja o acesso ao endereço se necessário.
 
 ---
 
