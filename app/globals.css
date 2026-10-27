@@ -430,7 +430,7 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 6px; border-radi
 .area-count { font-family: var(--mono); font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 99px; background: var(--surface-2); color: var(--text-2); }
 .area-count[data-complete="true"] { background: var(--violet-soft); color: var(--violet); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 16px; }
-@container (min-width: 900px) { .tiles { grid-template-columns: repeat(7, minmax(0, 1fr)); } .tile-actions { flex-direction: column; } }
+@container (min-width: 900px) { .tiles { grid-template-columns: repeat(7, minmax(0, 1fr)); } .tile-actions { flex-direction: column; } .tile-actions [data-slot="button"] { flex: none; width: 100%; } }
 .tile { position: relative; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); transition: border-color .2s, background-color .2s, box-shadow .2s, transform .2s var(--ease); }
 .tile:hover { border-color: var(--line-strong); box-shadow: var(--shadow); transform: translateY(-1px); }
 .tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -439,7 +439,7 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 6px; border-radi
 .tile-status i { width: 6px; height: 6px; border-radius: 99px; border: 1.5px solid var(--text-3); }
 .tile-name { font-family: var(--mono); font-size: 26px; font-weight: 500; letter-spacing: -0.04em; line-height: 1; }
 .tile-actions { display: flex; gap: 6px; }
-.tile-actions [data-slot="button"] { flex: 1; height: 32px; font-size: 12px; }
+.tile-actions [data-slot="button"] { flex: 1 1 0; min-width: 0; height: 32px; min-height: 32px; font-size: 12px; }
 .tile[data-state="ok"] { background: var(--violet-soft); border-color: var(--violet-line); }
 .tile[data-state="ok"] .tile-status { color: var(--violet); }
 .tile[data-state="ok"] .tile-status i { background: var(--violet); border-color: var(--violet); }
@@ -619,6 +619,7 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 6px; border-radi
   .tiles { grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
   .tile { padding: 12px; }
   .tile-actions { flex-direction: column; }
+  .tile-actions [data-slot="button"] { flex: none; width: 100%; }
   .tile-name { font-size: 22px; }
   .finish-bar { flex-wrap: wrap; gap: 12px; bottom: 8px; padding: 10px; }
   .finish-bar > div:nth-child(2) > span { display: none; }
