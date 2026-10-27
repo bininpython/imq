@@ -34,6 +34,12 @@ O comando de testes executa o build de produção e as verificações automatiza
 
 ---
 
+## Modo local (ativo)
+
+Por enquanto o app roda **sem Supabase** (`LOCAL_MODE = true` em `lib/imq-supabase.ts`): basta tocar no turno para entrar. Relatórios e evidências ficam no IndexedDB **do navegador usado** — não são compartilhados entre computadores e se perdem se os dados do site forem apagados. Exporte PDF/CSV dos fechamentos importantes.
+
+Para voltar ao Supabase, configure o projeto conforme a seção abaixo e troque `LOCAL_MODE` para `false`.
+
 ## Acesso sem PIN — configuração do Supabase
 
 1. Em **Authentication > Sign In / Providers**, ative **Allow anonymous sign-ins**.

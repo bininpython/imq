@@ -19,3 +19,14 @@ test("a migração sem PIN grava e lê pelo turno da sessão sem apagar dados", 
   assert.match(sql, /shift = \(select public\.imq_current_shift\(\)\)/);
   assert.doesNotMatch(sql, /^\s*(drop table|delete from|truncate)/im);
 });
+
+test("o modo local funciona sem Supabase e guarda dados no navegador", async () => {
+  const client = await readFile(new URL("../lib/imq-supabase.ts", import.meta.url), "utf8");
+  const store = await readFile(new URL("../lib/local-store.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(client, /export const LOCAL_MODE = true;/);
+  assert.match(client, /if \(LOCAL_MODE\) return saveReportLocally\(input\);/);
+  assert.match(store, /indexedDB\.open\(DB_NAME, DB_VERSION\)/);
+  assert.match(page, /if \(LOCAL_MODE\) \{\s+setAuthUser\(saveLocalShiftUser\(shift\)\);/);
+});

@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { DEFECTS, DEFECT_GROUPS, EQUIPMENT_CODES, EQUIPMENT_CODE_BY_NAME } from "@/lib/inspection-codes";
 import {
-  downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, getEvidenceContentType, saveReport,
+  LOCAL_MODE, downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, getEvidenceContentType, saveReport,
   snapshotEvidenceFile, supabase, type Deviation, type EvidenceFile, type StoredReport,
 } from "@/lib/imq-supabase";
 
@@ -124,6 +124,10 @@ export default function Home() {
   const authKey = authUser ? `${authUser.id}:${authUser.shift}` : null;
 
   useEffect(() => {
+    if (LOCAL_MODE) {
+      const task = window.setTimeout(() => { setAuthUser(readLocalShiftUser()); setAuthReady(true); }, 0);
+      return () => window.clearTimeout(task);
+    }
     let mounted = true;
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
@@ -160,6 +164,17 @@ export default function Home() {
 
   /** Entrada sem PIN: sessão anônima do Supabase marcada com o turno escolhido. */
   async function enterShift(shift: ShiftCode) {
+    if (LOCAL_MODE) {
+      setAuthUser(saveLocalShiftUser(shift));
+    } else {
+      await enterSupabaseShift(shift);
+    }
+    resetDraft();
+    setChoosingShift(false);
+    setView("dashboard");
+  }
+
+  async function enterSupabaseShift(shift: ShiftCode) {
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.user) {
       // Reaproveita a sessão do dispositivo e só troca o turno.
@@ -173,9 +188,6 @@ export default function Home() {
       if (error) throw error;
       setAuthUser(getShiftUser(data.user ?? undefined));
     }
-    resetDraft();
-    setChoosingShift(false);
-    setView("dashboard");
   }
 
   useEffect(() => {
@@ -326,7 +338,7 @@ export default function Home() {
           <CommandIcon /><span>Comandos</span><kbd>Ctrl K</kbd>
         </button>
         <div className="rail-foot">
-          <div className="rail-secure"><ShieldCheck /><span>Acesso por turno · dados com RLS</span></div>
+          <div className="rail-secure"><ShieldCheck /><span>{LOCAL_MODE ? "Modo local · dados neste navegador" : "Acesso por turno · dados com RLS"}</span></div>
           <div className="rail-profile">
             <div className="rail-avatar">{authUser.shift}</div>
             <div><strong>{authUser.label}</strong><span>Turno da {shiftPeriod}</span></div>
@@ -469,6 +481,30 @@ function AuthLoading() {
   return <main className="boot"><Logo size={44} /><div className="boot-bar"><span /></div><strong>Carregando ambiente seguro…</strong></main>;
 }
 
+/* Sessão do modo local: só o turno escolhido, guardado neste navegador. */
+const LOCAL_SHIFT_KEY = "imiq-shift";
+const LOCAL_DEVICE_KEY = "imiq-device";
+
+function readLocalShiftUser(): AuthUser | null {
+  try {
+    const shift = localStorage.getItem(LOCAL_SHIFT_KEY);
+    if (shift !== "TN" && shift !== "TM" && shift !== "TT") return null;
+    return { id: localStorage.getItem(LOCAL_DEVICE_KEY) || "local", shift, label: SHIFT_ACCOUNTS[shift].label };
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalShiftUser(shift: ShiftCode): AuthUser {
+  let id = "local";
+  try {
+    id = localStorage.getItem(LOCAL_DEVICE_KEY) || crypto.randomUUID();
+    localStorage.setItem(LOCAL_DEVICE_KEY, id);
+    localStorage.setItem(LOCAL_SHIFT_KEY, shift);
+  } catch { /* sem armazenamento: vale só nesta aba */ }
+  return { id, shift, label: SHIFT_ACCOUNTS[shift].label };
+}
+
 function getShiftUser(user: { id: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> } | undefined): AuthUser | null {
   if (!user) return null;
   const shift = user.user_metadata?.shift ?? user.app_metadata?.shift;
@@ -528,7 +564,7 @@ function AuthScreen({ theme, onToggleTheme, current, onEnter, onCancel }: { them
         {message && <p className="auth-message" role="alert"><AlertTriangle /> {message}</p>}
         {onCancel && <Button type="button" variant="outline" onClick={onCancel} disabled={entering !== null}><ArrowLeft /> Voltar</Button>}
       </div>
-      <footer className="auth-foot"><span><ShieldCheck /> Dados protegidos pelo Supabase e políticas RLS</span><span>developed by Abner Lucas</span></footer>
+      <footer className="auth-foot"><span><ShieldCheck /> {LOCAL_MODE ? "Modo local: os registros ficam salvos neste navegador" : "Dados protegidos pelo Supabase e políticas RLS"}</span><span>developed by Abner Lucas</span></footer>
     </section>
   </main>;
 }

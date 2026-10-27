@@ -1,4 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
+import { getLocalEvidence, listLocalReports, saveLocalReport } from "./local-store";
+
+/**
+ * Modo local: o app funciona sem Supabase, com o turno escolhido num toque e
+ * relatórios/evidências guardados no IndexedDB deste navegador.
+ * Para voltar ao Supabase (dados compartilhados), troque para `false` depois
+ * de configurar o projeto conforme o README.
+ */
+export const LOCAL_MODE = true;
+const LOCAL_EVIDENCE_PREFIX = "local:";
 
 const SUPABASE_URL = "https://lqadpxkngnryrfalrrjv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_dEOw8CNPoB0Y7FQe_-y71w_LAHXcYxY";
@@ -110,6 +120,10 @@ type ReportRow = {
 };
 
 export async function fetchReports(): Promise<StoredReport[]> {
+  if (LOCAL_MODE) {
+    const reports = await listLocalReports<StoredReport>();
+    return reports.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
   const { data, error } = await supabase
     .from("imq_reports")
     .select(`
@@ -141,6 +155,7 @@ export async function saveReport(input: {
   generalObservation: string;
   deviations: Deviation[];
 }): Promise<void> {
+  if (LOCAL_MODE) return saveReportLocally(input);
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData.user) throw new Error("Sua sessão expirou. Entre novamente.");
 
@@ -208,11 +223,44 @@ export async function saveReport(input: {
   }
 }
 
+async function saveReportLocally(input: Parameters<typeof saveReport>[0]): Promise<void> {
+  const evidence: Array<{ key: string; blob: Blob }> = [];
+  const deviations = input.deviations.map(({ files, ...deviation }) => ({
+    ...deviation,
+    attachments: files.map((file) => {
+      const contentType = getEvidenceContentType(file);
+      if (!contentType) throw new Error(`${file.name} não é uma imagem ou vídeo compatível.`);
+      const id = crypto.randomUUID();
+      const storagePath = `${LOCAL_EVIDENCE_PREFIX}${input.id}/${deviation.id}/${id}`;
+      evidence.push({ key: storagePath, blob: file.blob });
+      return { id, name: file.name, type: contentType, size: file.size, storagePath };
+    }),
+  }));
+  const report: StoredReport = {
+    id: input.id,
+    reportDate: input.reportDate,
+    shift: input.shift,
+    reporter: input.reporter,
+    inspectorName: input.inspectorName,
+    status: "finalizado",
+    deviationCount: deviations.length,
+    createdAt: new Date().toISOString(),
+    payload: { reviewed: input.reviewed, generalObservation: input.generalObservation, deviations },
+  };
+  await saveLocalReport(report, evidence);
+}
+
+/** Lê a evidência do navegador (modo local) ou do Supabase Storage. */
+async function getEvidenceBlob(storagePath: string): Promise<Blob> {
+  if (storagePath.startsWith(LOCAL_EVIDENCE_PREFIX)) return getLocalEvidence(storagePath);
+  const { data, error } = await supabase.storage.from(EVIDENCE_BUCKET).download(storagePath);
+  if (error) throw error;
+  return data;
+}
+
 export async function downloadEvidence(attachment: AttachmentRef): Promise<void> {
   if (!attachment.storagePath) throw new Error("Caminho da evidência indisponível.");
-  const { data, error } = await supabase.storage.from(EVIDENCE_BUCKET).download(attachment.storagePath);
-  if (error) throw error;
-  downloadBlob(data, attachment.name);
+  downloadBlob(await getEvidenceBlob(attachment.storagePath), attachment.name);
 }
 
 export async function downloadReportPdf(report: StoredReport): Promise<void> {
@@ -351,7 +399,7 @@ export async function downloadReportPdf(report: StoredReport): Promise<void> {
     doc.text(`Pagina ${page} de ${pageCount}`, pageWidth - margin, pageHeight - 7, { align: "right" });
   }
 
-  downloadBlob(doc.output("blob"), `IMQ_${report.reportDate}_${report.shift}.pdf`);
+  downloadBlob(doc.output("blob"), `IMIQ_${report.reportDate}_${report.shift}.pdf`);
 }
 
 export function downloadBlob(blob: Blob, name: string): void {
@@ -400,10 +448,7 @@ async function loadPdfImage(attachment: AttachmentRef): Promise<{ dataUrl: strin
   const format = getPdfImageFormat(attachment.type, attachment.name);
   if (!format) return null;
 
-  const { data, error } = await supabase.storage.from(EVIDENCE_BUCKET).download(attachment.storagePath);
-  if (error) throw error;
-
-  const dataUrl = await blobToDataUrl(data);
+  const dataUrl = await blobToDataUrl(await getEvidenceBlob(attachment.storagePath));
   const dimensions = await getImageDimensions(dataUrl);
   return { dataUrl, format, ...dimensions };
 }
