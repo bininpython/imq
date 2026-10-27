@@ -3,9 +3,10 @@
 // dispositivos e somem se os dados do site forem apagados.
 
 const DB_NAME = "imiq-local";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const REPORTS = "reports";
 const EVIDENCE = "evidence";
+const IMPORTS = "imports";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -19,6 +20,7 @@ function openDb(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(REPORTS)) db.createObjectStore(REPORTS, { keyPath: "id" });
       if (!db.objectStoreNames.contains(EVIDENCE)) db.createObjectStore(EVIDENCE);
+      if (!db.objectStoreNames.contains(IMPORTS)) db.createObjectStore(IMPORTS, { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => {
@@ -65,4 +67,29 @@ export async function getLocalEvidence(key: string): Promise<Blob> {
       : reject(new Error("Evidência não encontrada neste navegador."));
     request.onerror = () => reject(request.error);
   });
+}
+
+/* ---------- Planilhas de produção importadas ---------- */
+
+export async function listLocalImports<T>(): Promise<T[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(IMPORTS, "readonly").objectStore(IMPORTS).getAll();
+    request.onsuccess = () => resolve(request.result as T[]);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveLocalImport(item: { id: string }): Promise<void> {
+  const db = await openDb();
+  const transaction = db.transaction(IMPORTS, "readwrite");
+  transaction.objectStore(IMPORTS).put(item);
+  await done(transaction);
+}
+
+export async function deleteLocalImport(id: string): Promise<void> {
+  const db = await openDb();
+  const transaction = db.transaction(IMPORTS, "readwrite");
+  transaction.objectStore(IMPORTS).delete(id);
+  await done(transaction);
 }

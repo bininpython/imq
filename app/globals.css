@@ -678,3 +678,88 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 6px; border-radi
   .print-observation p { font-size: 8px; line-height: 1.5; padding: 8px; border: 1px solid #999; }
   .print-report footer { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; border-top: 1px solid #999; padding-top: 5px; font-size: 7px; color: #555; }
 }
+
+/* ==========================================================================
+   Desvios da produção (importação de planilha)
+   ========================================================================== */
+.upload-drop { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 18px; width: 100%; padding: 22px 24px; text-align: left; border: 1.5px dashed var(--line-strong); border-radius: var(--r-lg); background: var(--surface); color: var(--text); transition: border-color .2s, background-color .2s, transform .2s var(--ease); }
+.upload-drop:hover:not(:disabled), .upload-drop[data-dragging] { border-color: var(--violet); background: var(--violet-soft); }
+.upload-drop[data-dragging] { transform: scale(1.005); }
+.upload-drop:disabled { cursor: progress; }
+.upload-drop-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: var(--r); background: var(--text); color: var(--surface); }
+.upload-drop-icon svg { width: 24px; height: 24px; }
+.upload-drop-text strong, .upload-drop-text small { display: block; }
+.upload-drop-text strong { font-size: 16px; font-weight: 650; letter-spacing: -0.015em; }
+.upload-drop-text small { margin-top: 2px; font-size: 13px; color: var(--text-3); }
+.upload-drop-cta { display: inline-flex; align-items: center; gap: 4px; height: 38px; padding: 0 14px; border-radius: var(--r-sm); background: var(--signal); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.upload-drop-cta svg { width: 15px; }
+.import-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.import-chip { flex: none; display: flex; align-items: center; gap: 2px; max-width: 360px; padding: 4px 4px 4px 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); transition: border-color .15s; }
+.import-chip[data-active] { border-color: var(--text); box-shadow: inset 0 -2px 0 var(--violet); }
+.import-chip > button:first-child { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 6px 8px 12px; border: 0; background: transparent; color: inherit; text-align: left; }
+.import-chip > button:first-child > svg { width: 18px; flex: none; color: var(--violet); }
+.import-chip strong, .import-chip small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-chip strong { font-size: 13px; font-weight: 600; }
+.import-chip small { font-size: 11.5px; color: var(--text-3); }
+.import-chip small b { font-weight: 600; color: var(--text-2); }
+.import-chip small b[data-tone="signal"] { color: var(--signal-ink); }
+.import-chip [data-slot="button"] { width: 30px; height: 30px; color: var(--text-3); }
+.import-chip [data-slot="button"]:hover { color: var(--signal-ink); }
+.shift-select { min-width: 280px; }
+.toolbar > [data-slot="button"] { margin-left: auto; }
+.inline-note { display: flex; align-items: center; gap: 8px; margin: -8px 0 0; font-size: 12.5px; color: var(--text-3); }
+.inline-note svg { width: 14px; color: var(--signal); flex: none; }
+.all-clear-panel { display: flex; align-items: center; gap: 16px; padding: 28px; background: var(--violet-soft); border-color: var(--violet-line); }
+.all-clear-panel > svg { width: 30px; height: 30px; color: var(--violet); flex: none; }
+.all-clear-panel strong, .all-clear-panel span { display: block; }
+.all-clear-panel strong { font-size: 17px; font-weight: 650; }
+.all-clear-panel span { font-size: 13.5px; color: var(--text-2); }
+.panel[data-highlight] { border-color: var(--signal-line); box-shadow: var(--shadow), inset 0 3px 0 var(--signal); }
+.panel[data-highlight] .panel-head h3 { font-size: 16px; }
+.bento.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bento.top { align-items: start; }
+.defect-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.defect-columns > div { padding: 16px 20px 20px; border-right: 1px solid var(--line); }
+.defect-columns > div:last-child { border-right: 0; }
+.defect-columns h4 { margin: 0 0 12px; font-family: var(--mono); font-size: 22px; font-weight: 500; letter-spacing: -0.03em; }
+.defect-columns h4 span { font-family: var(--font); font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin-right: 4px; }
+.ranks li:has(> .rank-button) { display: block; }
+.rank-button { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: center; margin: -4px -6px; padding: 4px 6px; width: calc(100% + 12px); border: 0; border-radius: var(--r-sm); background: transparent; color: inherit; text-align: left; transition: background-color .15s; }
+.rank-button:hover { background: var(--surface-2); }
+.ranks li[data-active] .rank-button { background: var(--violet-soft); box-shadow: inset 0 0 0 1px var(--violet-line); }
+.rank-main strong small { font-weight: 450; color: var(--text-3); }
+.filter-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 50%; height: 30px; padding: 0 10px; border: 1px solid var(--violet-line); border-radius: 99px; background: var(--violet-soft); color: var(--violet); font-size: 12px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.filter-pill svg { width: 13px; flex: none; }
+.coil-table [data-slot="table-container"] { max-height: 640px; overflow: auto; }
+.coil-table [data-slot="table-header"] { position: sticky; top: 0; z-index: 1; }
+.coil-table [data-slot="table-cell"] { vertical-align: top; padding: 12px 14px; }
+.coil-table [data-slot="table-head"] { padding: 0 14px; white-space: nowrap; }
+.cell-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.col-highlight { background: color-mix(in oklab, var(--signal-soft) 70%, transparent); }
+[data-slot="table-head"].col-highlight { color: var(--signal-ink); background: var(--signal-soft); }
+.route-cell { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+.route-cell svg { width: 14px; color: var(--text-3); }
+.route-cell[data-changed] b:last-child { color: var(--signal-ink); }
+.route-cell[data-changed] svg { color: var(--signal); }
+.kind-tags { display: flex; gap: 4px; margin-top: 6px; }
+.kind-tags i { font-style: normal; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); }
+.kind-tags i[data-kind="qualidade"] { background: var(--signal-soft); color: var(--signal-ink); }
+.kind-tags i[data-kind="fluxo"] { background: var(--violet-soft); color: var(--violet); }
+.reason { display: grid; gap: 4px; min-width: 150px; }
+.reason-resp { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+.reason[data-strong] .reason-resp { color: var(--signal-ink); }
+.reason-code { display: flex; align-items: flex-start; gap: 6px; }
+.reason-code small { font-size: 12px; line-height: 1.3; color: var(--text-2); }
+.defect-chip { display: grid; gap: 3px; min-width: 130px; }
+.defect-chip-top { display: flex; align-items: center; gap: 5px; }
+.defect-chip-top b { font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+.defect-chip-top em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.defect-chip small { font-size: 12px; line-height: 1.3; color: var(--text-2); }
+.defect-chip[data-unknown] .defect-code { background: var(--signal-soft); color: var(--signal-ink); border-color: var(--signal-line); }
+@media (max-width: 1100px) { .bento.three { grid-template-columns: 1fr; } .defect-columns { grid-template-columns: 1fr; } .defect-columns > div { border-right: 0; border-bottom: 1px solid var(--line); } }
+@media (max-width: 640px) {
+  .upload-drop { grid-template-columns: auto minmax(0, 1fr); padding: 16px; }
+  .upload-drop-cta { grid-column: 1 / -1; justify-content: center; }
+  .shift-select { min-width: 0; width: 100%; }
+  .toolbar > [data-slot="button"] { margin-left: 0; width: 100%; }
+}

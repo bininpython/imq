@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
+import { ProductionView } from "./production-view";
 import { DEFECTS, DEFECT_GROUPS, EQUIPMENT_CODES, EQUIPMENT_CODE_BY_NAME } from "@/lib/inspection-codes";
 import {
   LOCAL_MODE, downloadBlob, downloadEvidence, downloadReportPdf, fetchReports, getEvidenceContentType, saveReport,
@@ -43,12 +44,13 @@ type ShiftCode = keyof typeof SHIFT_ACCOUNTS;
 const SHIFT_CODES = Object.keys(SHIFT_ACCOUNTS) as ShiftCode[];
 type AuthUser = { id: string; shift: ShiftCode; label: string };
 
-type View = "dashboard" | "new" | "reports" | "library";
+type View = "dashboard" | "new" | "production" | "reports" | "library";
 const VIEWS: Record<View, { index: string; label: string; title: string; icon: React.ReactNode }> = {
   dashboard: { index: "01", label: "Visão geral", title: "Visão geral", icon: <LayoutDashboard /> },
   new: { index: "02", label: "Novo fechamento", title: "Novo fechamento de turno", icon: <ClipboardPlus /> },
-  reports: { index: "03", label: "Relatórios", title: "Relatórios de turno", icon: <FileText /> },
-  library: { index: "04", label: "Biblioteca de códigos", title: "Biblioteca de códigos", icon: <BookOpen /> },
+  production: { index: "03", label: "Desvios (planilha)", title: "Desvios da produção", icon: <FileSpreadsheet /> },
+  reports: { index: "04", label: "Relatórios", title: "Relatórios de turno", icon: <FileText /> },
+  library: { index: "05", label: "Biblioteca de códigos", title: "Biblioteca de códigos", icon: <BookOpen /> },
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -433,6 +435,7 @@ export default function Home() {
             </section>
           )}
           {view === "reports" && <ReportsView reports={filteredReports} loading={loadingReports} search={search} setSearch={setSearch} shiftFilter={shiftFilter} setShiftFilter={setShiftFilter} onView={setSelectedReport} onCsv={exportCsv} onPdf={printPdf} onEmail={emailReport} onNew={() => go("new")} />}
+          {view === "production" && <ProductionView />}
           {view === "library" && <CodeLibrary query={libraryQuery} setQuery={setLibraryQuery} />}
         </div>
         <footer className="stage-foot"><span>IMIQ - Inspeção</span><span>developed by Abner Lucas</span></footer>
