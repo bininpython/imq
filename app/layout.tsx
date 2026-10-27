@@ -10,6 +10,9 @@ export const metadata: Metadata = {
   },
   other: {
     "codex-preview": "development",
+    // A página já está em português; evita que o tradutor do navegador
+    // traduza a marca "IMIQ" e os códigos operacionais.
+    google: "notranslate",
   },
 };
 
@@ -29,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
+    <html lang="pt-BR" translate="no" className="notranslate" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
